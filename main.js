@@ -1,6 +1,82 @@
 import * as THREE from 'three';
 import { ChessGame } from './chess.js';
 
+// WebSocket connection
+let ws;
+let playerColor = null;
+let isConnected = false;
+
+function connectToServer() {
+  ws = new WebSocket('ws://localhost:8080');
+  
+  ws.onopen = () => {
+    console.log('Connected to server');
+    isConnected = true;
+    
+    // Send initial board state
+    ws.send(JSON.stringify({
+      type: 'init',
+      board: game.board,
+      currentTurn: game.currentTurn
+    }));
+  };
+  
+  ws.onmessage = (event) => {
+    const message = JSON.parse(event.data);
+    handleServerMessage(message);
+  };
+  
+  ws.onclose = () => {
+    console.log('Disconnected from server');
+    isConnected = false;
+    setTimeout(connectToServer, 3000); // Reconnect after 3 seconds
+  };
+  
+  ws.onerror = (error) => {
+    console.error('WebSocket error:', error);
+  };
+}
+
+function handleServerMessage(message) {
+  switch (message.type) {
+    case 'gameState':
+      if (message.state.board) {
+        game.board = message.state.board;
+        game.currentTurn = message.state.currentTurn;
+        updateBoard();
+      }
+      updatePlayerStatus(message.state.players);
+      break;
+      
+    case 'playerJoined':
+      updatePlayerStatus(message.players);
+      showNotification(`${message.color} player joined!`);
+      break;
+      
+    case 'playerLeft':
+      showNotification(`${message.color} player left`);
+      break;
+      
+    case 'pieceSelected':
+      // Show other player's selection (optional visual feedback)
+      break;
+      
+    case 'error':
+      showNotification(message.message);
+      break;
+  }
+}
+
+function updatePlayerStatus(players) {
+  const hasWhite = players && players.white;
+  const hasBlack = players && players.black;
+  
+  playerStatusDiv.innerHTML = `
+    <div>White: ${hasWhite ? '✓ Connected' : '⨯ Waiting...'}</div>
+    <div>Black: ${hasBlack ? '✓ Connected' : '⨯ Waiting...'}</div>
+  `;
+}
+
 // Scene setup
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
@@ -110,8 +186,8 @@ function updateBoard() {
     }
   }
   
-  // Highlight selected piece
-  if (game.selectedPiece) {
+  // Highlight selected piece (only for current player)
+  if (game.selectedPiece && playerColor === game.currentTurn) {
     const { row, col } = game.selectedPiece;
     squares[row][col].material = selectedMaterial;
     
@@ -202,8 +278,96 @@ ui.style.pointerEvents = 'none';
 ui.style.zIndex = '1000';
 document.body.appendChild(ui);
 
-document.addEventListener('click', () => {
-  if (!isPointerLocked) return;
+// Player status UI
+const playerStatusDiv = document.createElement('div');
+playerStatusDiv.style.position = 'fixed';
+playerStatusDiv.style.top = '10px';
+playerStatusDiv.style.right = '10px';
+playerStatusDiv.style.color = 'white';
+playerStatusDiv.style.fontFamily = 'Arial, sans-serif';
+playerStatusDiv.style.fontSize = '16px';
+playerStatusDiv.style.textShadow = '2px 2px 4px black';
+playerStatusDiv.style.pointerEvents = 'none';
+playerStatusDiv.style.zIndex = '1000';
+playerStatusDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+playerStatusDiv.style.padding = '10px';
+playerStatusDiv.style.borderRadius = '5px';
+document.body.appendChild(playerStatusDiv);
+
+// Color selection UI
+const colorSelectionDiv = document.createElement('div');
+colorSelectionDiv.style.position = 'fixed';
+colorSelectionDiv.style.top = '50%';
+colorSelectionDiv.style.left = '50%';
+colorSelectionDiv.style.transform = 'translate(-50%, -50%)';
+colorSelectionDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+colorSelectionDiv.style.padding = '30px';
+colorSelectionDiv.style.borderRadius = '10px';
+colorSelectionDiv.style.color = 'white';
+colorSelectionDiv.style.fontFamily = 'Arial, sans-serif';
+colorSelectionDiv.style.textAlign = 'center';
+colorSelectionDiv.style.zIndex = '2000';
+colorSelectionDiv.innerHTML = `
+  <h2 style="margin-bottom: 20px;">Choose Your Color</h2>
+  <button id="whiteBtn" style="padding: 15px 30px; margin: 10px; font-size: 18px; cursor: pointer; background: white; border: none; border-radius: 5px;">Play as White</button>
+  <button id="blackBtn" style="padding: 15px 30px; margin: 10px; font-size: 18px; cursor: pointer; background: #333; color: white; border: none; border-radius: 5px;">Play as Black</button>
+`;
+document.body.appendChild(colorSelectionDiv);
+
+// Notification system
+const notificationDiv = document.createElement('div');
+notificationDiv.style.position = 'fixed';
+notificationDiv.style.bottom = '20px';
+notificationDiv.style.left = '50%';
+notificationDiv.style.transform = 'translateX(-50%)';
+notificationDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+notificationDiv.style.color = 'white';
+notificationDiv.style.padding = '15px 30px';
+notificationDiv.style.borderRadius = '5px';
+notificationDiv.style.fontFamily = 'Arial, sans-serif';
+notificationDiv.style.fontSize = '16px';
+notificationDiv.style.display = 'none';
+notificationDiv.style.zIndex = '2000';
+document.body.appendChild(notificationDiv);
+
+function showNotification(message) {
+  notificationDiv.textContent = message;
+  notificationDiv.style.display = 'block';
+  setTimeout(() => {
+    notificationDiv.style.display = 'none';
+  }, 3000);
+}
+
+document.getElementById('whiteBtn').addEventListener('click', () => {
+  selectColor('white');
+});
+
+document.getElementById('blackBtn').addEventListener('click', () => {
+  selectColor('black');
+});
+
+function selectColor(color) {
+  if (isConnected) {
+    ws.send(JSON.stringify({
+      type: 'join',
+      color: color
+    }));
+    playerColor = color;
+    colorSelectionDiv.style.display = 'none';
+    showNotification(`You are playing as ${color}`);
+  } else {
+    showNotification('Not connected to server. Please wait...');
+  }
+}
+
+document.addEventListener('click', (e) => {
+  if (!isPointerLocked || !playerColor) return;
+  
+  // Only allow moves on your turn
+  if (playerColor !== game.currentTurn) {
+    showNotification("It's not your turn!");
+    return;
+  }
   
   raycaster.setFromCamera({ x: 0, y: 0 }, camera);
   
@@ -227,7 +391,22 @@ document.addEventListener('click', () => {
       row = Math.floor(z / squareSize);
     }
     
-    game.selectPiece(row, col);
+    const prevSelected = game.selectedPiece;
+    const moved = game.selectPiece(row, col);
+    
+    if (moved && isConnected) {
+      // Send move to server
+      ws.send(JSON.stringify({
+        type: 'move',
+        fromRow: prevSelected.row,
+        fromCol: prevSelected.col,
+        toRow: row,
+        toCol: col,
+        board: game.board,
+        currentTurn: game.currentTurn
+      }));
+    }
+    
     updateBoard();
   }
 });
@@ -260,8 +439,13 @@ function animate() {
   
   updateMovement();
   
+  const turnIndicator = playerColor === game.currentTurn ? '🟢 YOUR TURN' : '🔴 OPPONENT\'S TURN';
+  const colorDisplay = playerColor ? `You: ${playerColor.toUpperCase()}` : 'Selecting color...';
+  
   ui.innerHTML = `
-    <div>Turn: ${game.currentTurn}</div>
+    <div>${colorDisplay}</div>
+    <div>Current Turn: ${game.currentTurn}</div>
+    <div style="margin-top: 5px; font-weight: bold;">${turnIndicator}</div>
     <div style="margin-top: 10px; font-size: 14px;">
       WASD: Move | Mouse: Look | Space/Shift: Up/Down<br>
       Click to lock cursor | Click pieces to play
@@ -279,5 +463,6 @@ window.addEventListener('resize', () => {
 });
 
 // Start
+connectToServer();
 updateBoard();
 animate();
