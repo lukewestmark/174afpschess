@@ -5,20 +5,17 @@ import { ChessGame } from './chess.js';
 let ws;
 let playerColor = null;
 let isConnected = false;
+let currentRoomCode = null;
+
+// Use environment variable or default to localhost
+const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8080';
 
 function connectToServer() {
-  ws = new WebSocket('ws://localhost:8080');
+  ws = new WebSocket(WS_URL);
   
   ws.onopen = () => {
     console.log('Connected to server');
     isConnected = true;
-    
-    // Send initial board state
-    ws.send(JSON.stringify({
-      type: 'init',
-      board: game.board,
-      currentTurn: game.currentTurn
-    }));
   };
   
   ws.onmessage = (event) => {
@@ -29,7 +26,7 @@ function connectToServer() {
   ws.onclose = () => {
     console.log('Disconnected from server');
     isConnected = false;
-    setTimeout(connectToServer, 3000); // Reconnect after 3 seconds
+    setTimeout(connectToServer, 3000);
   };
   
   ws.onerror = (error) => {
@@ -39,6 +36,32 @@ function connectToServer() {
 
 function handleServerMessage(message) {
   switch (message.type) {
+    case 'roomCreated':
+      currentRoomCode = message.roomCode;
+      roomCodeDisplay.textContent = `Room Code: ${message.roomCode}`;
+      roomSetupDiv.style.display = 'none';
+      showNotification(`Room created! Share code: ${message.roomCode}`);
+      break;
+      
+    case 'roomJoined':
+      currentRoomCode = message.roomCode;
+      roomCodeDisplay.textContent = `Room Code: ${message.roomCode}`;
+      roomSetupDiv.style.display = 'none';
+      if (message.gameState.board) {
+        game.board = message.gameState.board;
+        game.currentTurn = message.gameState.currentTurn;
+        updateBoard();
+      }
+      updatePlayerStatus(message.gameState.players);
+      showNotification(`Joined room: ${message.roomCode}`);
+      // Send initial board state
+      ws.send(JSON.stringify({
+        type: 'init',
+        board: game.board,
+        currentTurn: game.currentTurn
+      }));
+      break;
+      
     case 'gameState':
       if (message.state.board) {
         game.board = message.state.board;
@@ -55,10 +78,6 @@ function handleServerMessage(message) {
       
     case 'playerLeft':
       showNotification(`${message.color} player left`);
-      break;
-      
-    case 'pieceSelected':
-      // Show other player's selection (optional visual feedback)
       break;
       
     case 'error':
@@ -278,6 +297,24 @@ ui.style.pointerEvents = 'none';
 ui.style.zIndex = '1000';
 document.body.appendChild(ui);
 
+// Room code display
+const roomCodeDisplay = document.createElement('div');
+roomCodeDisplay.style.position = 'fixed';
+roomCodeDisplay.style.top = '10px';
+roomCodeDisplay.style.left = '50%';
+roomCodeDisplay.style.transform = 'translateX(-50%)';
+roomCodeDisplay.style.color = 'white';
+roomCodeDisplay.style.fontFamily = 'Arial, sans-serif';
+roomCodeDisplay.style.fontSize = '24px';
+roomCodeDisplay.style.fontWeight = 'bold';
+roomCodeDisplay.style.textShadow = '2px 2px 4px black';
+roomCodeDisplay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+roomCodeDisplay.style.padding = '10px 20px';
+roomCodeDisplay.style.borderRadius = '5px';
+roomCodeDisplay.style.pointerEvents = 'none';
+roomCodeDisplay.style.zIndex = '1000';
+document.body.appendChild(roomCodeDisplay);
+
 // Player status UI
 const playerStatusDiv = document.createElement('div');
 playerStatusDiv.style.position = 'fixed';
@@ -294,6 +331,29 @@ playerStatusDiv.style.padding = '10px';
 playerStatusDiv.style.borderRadius = '5px';
 document.body.appendChild(playerStatusDiv);
 
+// Room setup UI
+const roomSetupDiv = document.createElement('div');
+roomSetupDiv.style.position = 'fixed';
+roomSetupDiv.style.top = '50%';
+roomSetupDiv.style.left = '50%';
+roomSetupDiv.style.transform = 'translate(-50%, -50%)';
+roomSetupDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+roomSetupDiv.style.padding = '30px';
+roomSetupDiv.style.borderRadius = '10px';
+roomSetupDiv.style.color = 'white';
+roomSetupDiv.style.fontFamily = 'Arial, sans-serif';
+roomSetupDiv.style.textAlign = 'center';
+roomSetupDiv.style.zIndex = '2000';
+roomSetupDiv.innerHTML = `
+  <h2 style="margin-bottom: 20px;">FPS Chess - Multiplayer</h2>
+  <button id="createRoomBtn" style="padding: 15px 30px; margin: 10px; font-size: 18px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 5px;">Create New Room</button>
+  <div style="margin: 20px 0;">- OR -</div>
+  <input id="roomCodeInput" type="text" placeholder="Enter Room Code" style="padding: 10px; font-size: 16px; margin: 10px; border-radius: 5px; border: none; text-align: center;">
+  <br>
+  <button id="joinRoomBtn" style="padding: 15px 30px; margin: 10px; font-size: 18px; cursor: pointer; background: #2196F3; color: white; border: none; border-radius: 5px;">Join Room</button>
+`;
+document.body.appendChild(roomSetupDiv);
+
 // Color selection UI
 const colorSelectionDiv = document.createElement('div');
 colorSelectionDiv.style.position = 'fixed';
@@ -307,6 +367,7 @@ colorSelectionDiv.style.color = 'white';
 colorSelectionDiv.style.fontFamily = 'Arial, sans-serif';
 colorSelectionDiv.style.textAlign = 'center';
 colorSelectionDiv.style.zIndex = '2000';
+colorSelectionDiv.style.display = 'none';
 colorSelectionDiv.innerHTML = `
   <h2 style="margin-bottom: 20px;">Choose Your Color</h2>
   <button id="whiteBtn" style="padding: 15px 30px; margin: 10px; font-size: 18px; cursor: pointer; background: white; border: none; border-radius: 5px;">Play as White</button>
@@ -338,6 +399,34 @@ function showNotification(message) {
   }, 3000);
 }
 
+// Room setup handlers
+document.getElementById('createRoomBtn').addEventListener('click', () => {
+  if (isConnected) {
+    ws.send(JSON.stringify({ type: 'createRoom' }));
+    colorSelectionDiv.style.display = 'block';
+  } else {
+    showNotification('Not connected to server. Please wait...');
+  }
+});
+
+document.getElementById('joinRoomBtn').addEventListener('click', () => {
+  const roomCode = document.getElementById('roomCodeInput').value.trim().toUpperCase();
+  if (!roomCode) {
+    showNotification('Please enter a room code');
+    return;
+  }
+  
+  if (isConnected) {
+    ws.send(JSON.stringify({ 
+      type: 'joinRoom',
+      roomCode: roomCode
+    }));
+    colorSelectionDiv.style.display = 'block';
+  } else {
+    showNotification('Not connected to server. Please wait...');
+  }
+});
+
 document.getElementById('whiteBtn').addEventListener('click', () => {
   selectColor('white');
 });
@@ -347,7 +436,7 @@ document.getElementById('blackBtn').addEventListener('click', () => {
 });
 
 function selectColor(color) {
-  if (isConnected) {
+  if (isConnected && currentRoomCode) {
     ws.send(JSON.stringify({
       type: 'join',
       color: color
@@ -356,7 +445,7 @@ function selectColor(color) {
     colorSelectionDiv.style.display = 'none';
     showNotification(`You are playing as ${color}`);
   } else {
-    showNotification('Not connected to server. Please wait...');
+    showNotification('Not in a room. Please create or join a room first.');
   }
 }
 
