@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ChessGame } from './chess.js';
+import { BattleArena } from './battle.js';
 
 // WebSocket connection
 let ws;
@@ -70,6 +71,69 @@ function handleServerMessage(message) {
       }
       updatePlayerStatus(message.state.players);
       break;
+    
+    case 'startBattle':
+      // Determine if this player is the attacker or defender
+      const isAttacker = playerColor === message.attackingPiece.color;
+      battleFromRow = message.fromRow;
+      battleFromCol = message.fromCol;
+      battleToRow = message.toRow;
+      battleToCol = message.toCol;
+      
+      // Hide chess board
+      boardGroup.visible = false;
+      
+      showNotification(isAttacker ? 'You are attacking! Win the battle!' : 'Defend yourself!');
+      
+      battleArena.startBattle(
+        message.attackingPiece,
+        message.defendingPiece,
+        isAttacker,
+        (playerWon) => {
+          handleBattleEnd(playerWon, isAttacker);
+        }
+      );
+      break;
+    
+    case 'opponentUpdate':
+      // Update opponent's position and handle their shots
+      if (battleArena.isActive()) {
+        battleArena.updateOpponentPosition(message.position, message.rotation);
+        
+        if (message.shot) {
+          battleArena.handleOpponentShot(message.shot);
+        }
+        
+        // Update opponent health from their perspective (their health becomes our opponent health)
+        if (message.health !== undefined) {
+          battleArena.updateOpponentHealth(message.health);
+        }
+      }
+      break;
+    
+    case 'battleEnded':
+      // Clean up battle arena first
+      if (battleArena.isActive()) {
+        battleArena.cleanup();
+        battleArena.battleActive = false;
+      }
+      
+      // Update board after battle
+      game.board = message.board;
+      game.currentTurn = message.currentTurn;
+      
+      // Show chess board again
+      boardGroup.visible = true;
+      
+      // Reset camera to chess view
+      camera.position.set(0, 2, 5);
+      camera.rotation.set(0, 0, 0);
+      
+      updateBoard();
+      
+      const resultMsg = message.attackerWon ? 'Attacker won the battle!' : 'Defender won the battle!';
+      showNotification(resultMsg);
+      break;
       
     case 'playerJoined':
       updatePlayerStatus(message.players);
@@ -127,6 +191,14 @@ scene.add(dirLight);
 
 // Chess game
 const game = new ChessGame();
+
+// Battle arena
+const battleArena = new BattleArena(scene, camera);
+let pendingBattle = null;
+let battleFromRow = null;
+let battleFromCol = null;
+let battleToRow = null;
+let battleToCol = null;
 
 // Board
 const boardSize = 8;
@@ -450,7 +522,27 @@ function selectColor(color) {
 }
 
 document.addEventListener('click', (e) => {
-  if (!isPointerLocked || !playerColor) return;
+  if (!isPointerLocked) return;
+  
+  // Handle shooting in battle mode
+  if (battleArena.isActive()) {
+    const shotData = battleArena.shoot();
+    
+    // Send shot to server for other player
+    if (shotData && isConnected) {
+      const playerState = battleArena.getPlayerState();
+      ws.send(JSON.stringify({
+        type: 'battleUpdate',
+        position: playerState.position,
+        rotation: playerState.rotation,
+        shot: shotData,
+        health: playerState.health
+      }));
+    }
+    return;
+  }
+  
+  if (!playerColor) return;
   
   // Only allow moves on your turn
   if (playerColor !== game.currentTurn) {
@@ -481,9 +573,15 @@ document.addEventListener('click', (e) => {
     }
     
     const prevSelected = game.selectedPiece;
+    const targetPiece = game.getPiece(row, col);
+    const isCapture = targetPiece && targetPiece.color !== playerColor && 
+                     game.validMoves.some(m => m.row === row && m.col === col);
+    
     const moved = game.selectPiece(row, col);
     
     if (moved && isConnected) {
+      const attackingPiece = game.board[battleToRow || row][battleToCol || col];
+      
       // Send move to server
       ws.send(JSON.stringify({
         type: 'move',
@@ -492,7 +590,10 @@ document.addEventListener('click', (e) => {
         toRow: row,
         toCol: col,
         board: game.board,
-        currentTurn: game.currentTurn
+        currentTurn: game.currentTurn,
+        isCapture: isCapture,
+        attackingPiece: prevSelected.piece,
+        defendingPiece: targetPiece
       }));
     }
     
@@ -502,42 +603,134 @@ document.addEventListener('click', (e) => {
 
 // Movement
 function updateMovement() {
-  const forward = new THREE.Vector3();
-  const right = new THREE.Vector3();
+  if (battleArena.isActive()) {
+    // Battle mode movement
+    const forward = new THREE.Vector3();
+    const right = new THREE.Vector3();
+    
+    camera.getWorldDirection(forward);
+    forward.y = 0;
+    forward.normalize();
+    
+    right.crossVectors(forward, new THREE.Vector3(0, 1, 0));
+    
+    const moveSpeed = 0.15;
+    
+    if (keys['KeyW']) camera.position.addScaledVector(forward, moveSpeed);
+    if (keys['KeyS']) camera.position.addScaledVector(forward, -moveSpeed);
+    if (keys['KeyA']) camera.position.addScaledVector(right, -moveSpeed);
+    if (keys['KeyD']) camera.position.addScaledVector(right, moveSpeed);
+    
+    // Constrain to arena
+    battleArena.constrainPlayerMovement(camera.position);
+  } else {
+    // Normal chess board movement
+    const forward = new THREE.Vector3();
+    const right = new THREE.Vector3();
+    
+    camera.getWorldDirection(forward);
+    forward.y = 0;
+    forward.normalize();
+    
+    right.crossVectors(forward, new THREE.Vector3(0, 1, 0));
+    
+    if (keys['KeyW']) camera.position.addScaledVector(forward, moveSpeed);
+    if (keys['KeyS']) camera.position.addScaledVector(forward, -moveSpeed);
+    if (keys['KeyA']) camera.position.addScaledVector(right, -moveSpeed);
+    if (keys['KeyD']) camera.position.addScaledVector(right, moveSpeed);
+    if (keys['Space']) camera.position.y += moveSpeed;
+    if (keys['ShiftLeft']) camera.position.y -= moveSpeed;
+    
+    // Keep camera above ground
+    camera.position.y = Math.max(0.5, camera.position.y);
+  }
+}
+
+function handleBattleEnd(playerWon, isAttacker) {
+  // Determine actual winner based on attacker/defender
+  const attackerWon = (isAttacker && playerWon) || (!isAttacker && !playerWon);
   
-  camera.getWorldDirection(forward);
-  forward.y = 0;
-  forward.normalize();
+  // Update board based on battle result
+  if (attackerWon) {
+    // Attacker wins - piece moves to new square
+    game.board[battleToRow][battleToCol] = game.board[battleFromRow][battleFromCol];
+    game.board[battleFromRow][battleFromCol] = null;
+  } else {
+    // Defender wins - attacker is removed, defender stays
+    game.board[battleFromRow][battleFromCol] = null;
+  }
   
-  right.crossVectors(forward, new THREE.Vector3(0, 1, 0));
+  game.currentTurn = game.currentTurn === 'white' ? 'black' : 'white';
   
-  if (keys['KeyW']) camera.position.addScaledVector(forward, moveSpeed);
-  if (keys['KeyS']) camera.position.addScaledVector(forward, -moveSpeed);
-  if (keys['KeyA']) camera.position.addScaledVector(right, -moveSpeed);
-  if (keys['KeyD']) camera.position.addScaledVector(right, moveSpeed);
-  if (keys['Space']) camera.position.y += moveSpeed;
-  if (keys['ShiftLeft']) camera.position.y -= moveSpeed;
-  
-  // Keep camera above ground
-  camera.position.y = Math.max(0.5, camera.position.y);
+  // Send battle result to server
+  if (isConnected) {
+    ws.send(JSON.stringify({
+      type: 'battleResult',
+      attackerWon: attackerWon,
+      fromRow: battleFromRow,
+      fromCol: battleFromCol,
+      toRow: battleToRow,
+      toCol: battleToCol,
+      board: game.board,
+      currentTurn: game.currentTurn
+    }));
+  }
 }
 
 // Animation loop
+let lastTime = Date.now();
+let lastNetworkUpdate = Date.now();
+
 function animate() {
   requestAnimationFrame(animate);
   
+  const currentTime = Date.now();
+  const deltaTime = (currentTime - lastTime) / 1000;
+  lastTime = currentTime;
+  
   updateMovement();
+  
+  // Send position updates during battle (every 50ms)
+  if (battleArena.isActive() && currentTime - lastNetworkUpdate > 50 && isConnected) {
+    const playerState = battleArena.getPlayerState();
+    ws.send(JSON.stringify({
+      type: 'battleUpdate',
+      position: playerState.position,
+      rotation: playerState.rotation,
+      shot: null,
+      health: playerState.health
+    }));
+    lastNetworkUpdate = currentTime;
+  }
+  
+  // Update battle if active
+  let healthInfo = '';
+  if (battleArena.isActive()) {
+    const health = battleArena.updateBattle(deltaTime);
+    
+    healthInfo = `
+      <div style="margin-top: 10px; font-size: 20px; font-weight: bold;">
+        🎯 BATTLE MODE 🎯<br>
+        Your Health: ${health.playerHealth}%<br>
+        Enemy Health: ${health.opponentHealth}%
+      </div>
+    `;
+  }
   
   const turnIndicator = playerColor === game.currentTurn ? '🟢 YOUR TURN' : '🔴 OPPONENT\'S TURN';
   const colorDisplay = playerColor ? `You: ${playerColor.toUpperCase()}` : 'Selecting color...';
+  
+  const controls = battleArena.isActive() 
+    ? 'WASD: Move | Mouse: Look | CLICK: Shoot'
+    : 'WASD: Move | Mouse: Look | Space/Shift: Up/Down<br>Click to lock cursor | Click pieces to play';
   
   ui.innerHTML = `
     <div>${colorDisplay}</div>
     <div>Current Turn: ${game.currentTurn}</div>
     <div style="margin-top: 5px; font-weight: bold;">${turnIndicator}</div>
+    ${healthInfo}
     <div style="margin-top: 10px; font-size: 14px;">
-      WASD: Move | Mouse: Look | Space/Shift: Up/Down<br>
-      Click to lock cursor | Click pieces to play
+      ${controls}
     </div>
   `;
   

@@ -30,6 +30,12 @@ wss.on('connection', (ws) => {
         case 'move':
           handleMove(ws, message);
           break;
+        case 'battleResult':
+          handleBattleResult(ws, message);
+          break;
+        case 'battleUpdate':
+          handleBattleUpdate(ws, message);
+          break;
         case 'select':
           handleSelect(ws, message);
           break;
@@ -58,7 +64,8 @@ function handleCreateRoom(ws, message) {
       white: null,
       black: null
     },
-    clients: new Set()
+    clients: new Set(),
+    battleInProgress: false
   });
   
   ws.roomCode = roomCode;
@@ -145,20 +152,85 @@ function handleMove(ws, message) {
   if (!roomCode || !gameRooms.has(roomCode)) return;
   
   const room = gameRooms.get(roomCode);
-  const { fromRow, fromCol, toRow, toCol, board, currentTurn } = message;
+  const { fromRow, fromCol, toRow, toCol, board, currentTurn, isCapture } = message;
+  
+  if (isCapture) {
+    // Initiate battle mode
+    room.battleInProgress = true;
+    broadcastToRoom(roomCode, {
+      type: 'startBattle',
+      attackingPiece: message.attackingPiece,
+      defendingPiece: message.defendingPiece,
+      fromRow,
+      fromCol,
+      toRow,
+      toCol
+    });
+  } else {
+    // Normal move
+    room.board = board;
+    room.currentTurn = currentTurn;
+    
+    broadcastToRoom(roomCode, {
+      type: 'gameState',
+      state: {
+        board: room.board,
+        currentTurn: room.currentTurn,
+        players: {
+          white: room.players.white !== null,
+          black: room.players.black !== null
+        }
+      }
+    });
+  }
+}
+
+function handleBattleResult(ws, message) {
+  const roomCode = ws.roomCode;
+  
+  if (!roomCode || !gameRooms.has(roomCode)) return;
+  
+  const room = gameRooms.get(roomCode);
+  
+  // Prevent processing battle result twice
+  if (!room.battleInProgress) {
+    console.log('Battle already ended, ignoring duplicate result');
+    return;
+  }
+  
+  const { attackerWon, fromRow, fromCol, toRow, toCol, board, currentTurn } = message;
   
   room.board = board;
   room.currentTurn = currentTurn;
+  room.battleInProgress = false; // Mark battle as ended
   
   broadcastToRoom(roomCode, {
-    type: 'gameState',
-    state: {
-      board: room.board,
-      currentTurn: room.currentTurn,
-      players: {
-        white: room.players.white !== null,
-        black: room.players.black !== null
-      }
+    type: 'battleEnded',
+    attackerWon,
+    board: room.board,
+    currentTurn: room.currentTurn
+  });
+  
+  console.log(`Battle ended in room ${roomCode}, attacker won: ${attackerWon}`);
+}
+
+function handleBattleUpdate(ws, message) {
+  const roomCode = ws.roomCode;
+  
+  if (!roomCode || !gameRooms.has(roomCode)) return;
+  
+  const room = gameRooms.get(roomCode);
+  
+  // Broadcast this player's state to the other player
+  room.clients.forEach(client => {
+    if (client !== ws && client.readyState === 1) {
+      client.send(JSON.stringify({
+        type: 'opponentUpdate',
+        position: message.position,
+        rotation: message.rotation,
+        shot: message.shot,
+        health: message.health
+      }));
     }
   });
 }
