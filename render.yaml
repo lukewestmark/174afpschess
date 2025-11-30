@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: fps-chess-server
+    env: node
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+  
+  - type: web
+    name: fps-chess-client
+    env: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
