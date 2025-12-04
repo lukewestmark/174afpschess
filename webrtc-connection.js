@@ -10,8 +10,7 @@ export class WebRTCConnection {
     this.connectionStateCallback = null;
     this.remoteDescriptionSet = false;
     this.remoteUfrag = null;
-
-    const defaultIceServers = [
+    this.defaultIceServers = [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun.l.google.com:5349' },
       { urls: 'stun:stun1.l.google.com:3478' },
@@ -25,15 +24,22 @@ export class WebRTCConnection {
     ];
 
     const customIceServers = this.getCustomIceServers();
+    const sanitizedCustomIce = this.sanitizeIceServers(customIceServers);
 
     this.config = {
-      iceServers: customIceServers || defaultIceServers,
+      iceServers: sanitizedCustomIce || this.defaultIceServers,
       iceCandidatePoolSize: 10
     };
   }
 
   async initialize() {
-    this.peerConnection = new RTCPeerConnection(this.config);
+    try {
+      this.peerConnection = new RTCPeerConnection(this.config);
+    } catch (error) {
+      console.warn('Failed to create RTCPeerConnection with custom ICE servers, falling back to defaults:', error);
+      this.config.iceServers = this.defaultIceServers;
+      this.peerConnection = new RTCPeerConnection(this.config);
+    }
 
     // Set up ICE candidate handling
     this.peerConnection.onicecandidate = (event) => {
@@ -260,6 +266,32 @@ export class WebRTCConnection {
     for (const candidate of queue) {
       await this.addIceCandidate(candidate);
     }
+  }
+
+  sanitizeIceServers(servers) {
+    if (!servers || !Array.isArray(servers)) return null;
+
+    const normalized = [];
+
+    for (const server of servers) {
+      if (!server || !server.urls) continue;
+      const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+
+      // Only allow stun/turn/turns schemes, skip placeholders or malformed entries
+      const validUrls = urls.filter((u) =>
+        typeof u === 'string' &&
+        /^[tT]urns?:[^\\s<>]+$/.test(u) || /^[sS]tuns?:[^\\s<>]+$/.test(u)
+      );
+
+      if (validUrls.length === 0) continue;
+
+      normalized.push({
+        ...server,
+        urls: validUrls
+      });
+    }
+
+    return normalized.length > 0 ? normalized : null;
   }
 
   getCustomIceServers() {
