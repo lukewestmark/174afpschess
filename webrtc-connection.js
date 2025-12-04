@@ -32,6 +32,10 @@ export class WebRTCConnection {
 
     if (sanitizedCustomIce && sanitizedCustomIce.length > 0) {
       iceServers = sanitizedCustomIce;
+    } else if (customIceConfig?.iceTransportPolicy === 'relay' && customIceConfig?.iceServers) {
+      // Relay-only requested: trust the provided list as-is (normalized to array) to avoid over-sanitizing
+      iceServers = this.normalizeIceList(customIceConfig.iceServers);
+      iceTransportPolicy = 'relay';
     } else if (customIceConfig?.iceTransportPolicy === 'relay') {
       // Relay-only requested but nothing valid: use empty list (no STUN) to avoid invalid URLs
       iceServers = [];
@@ -291,17 +295,35 @@ export class WebRTCConnection {
   }
 
   sanitizeIceServers(servers) {
-    if (!servers || !Array.isArray(servers)) return null;
+    if (!servers) return null;
+    const list = Array.isArray(servers) ? servers : [servers];
 
     const normalized = [];
 
-    for (const server of servers) {
-      if (!server || !server.urls) continue;
-      const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    for (const server of list) {
+      if (!server) continue;
+      // Support string shorthand
+      if (typeof server === 'string') {
+        normalized.push({ urls: [server] });
+        continue;
+      }
+
+      const rawUrls = server.urls || server.url;
+      if (!rawUrls) continue;
+      const urls = Array.isArray(rawUrls) ? rawUrls : [rawUrls];
 
       // Only allow stun/turn/turns schemes, skip placeholders or malformed entries
       const validUrls = urls
-        .map((u) => (typeof u === 'string' ? u.trim() : ''))
+        .map((u) => {
+          if (typeof u !== 'string') return '';
+          const trimmed = u.trim();
+          if (/^turns?:/i.test(trimmed) || /^stuns?:/i.test(trimmed)) return trimmed;
+          // Accept bare host:port[?query] and coerce to turn:
+          if (/^[0-9A-Za-z.-]+:\\d+/.test(trimmed)) {
+            return `turn:${trimmed}`;
+          }
+          return '';
+        })
         .filter((u) => {
           if (!u) return false;
           return /^turns?:[^\\s<>]+$/i.test(u) || /^stuns?:[^\\s<>]+$/i.test(u);
@@ -327,6 +349,11 @@ export class WebRTCConnection {
     }
 
     return normalized.length > 0 ? normalized : null;
+  }
+
+  normalizeIceList(servers) {
+    if (!servers) return [];
+    return Array.isArray(servers) ? servers : [servers];
   }
 
   getCustomIceServers() {
