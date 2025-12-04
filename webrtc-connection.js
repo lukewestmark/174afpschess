@@ -43,11 +43,16 @@ export class WebRTCConnection {
       this.peerConnection = new RTCPeerConnection(this.config);
     }
 
+    if (!this.configDebugLogged) {
+      console.log('Using ICE config:', this.config);
+      this.configDebugLogged = true;
+    }
+
     // Set up ICE candidate handling
     this.peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
         this.iceCandidates.push(event.candidate);
-        console.log('🧊 ICE candidate generated:', this.describeCandidate(event.candidate));
+        console.log('🧊 ICE candidate generated:', this.describeCandidate(event.candidate), event.candidate.candidate || '');
       }
     };
 
@@ -283,7 +288,7 @@ export class WebRTCConnection {
       const validUrls = urls.filter((u) => {
         if (typeof u !== 'string') return false;
         const trimmed = u.trim();
-        return /^turns?:[^\\s<>]+$/i.test(trimmed) || /^stuns?:[^\\s<>]+$/i.test(trimmed);
+        return (/^turns?:[^\\s<>]+$/i.test(trimmed)) || (/^stuns?:[^\\s<>]+$/i.test(trimmed));
       });
 
       if (validUrls.length === 0) continue;
