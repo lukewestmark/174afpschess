@@ -32,9 +32,9 @@ export class NetworkManager {
         ips = data.ips;
       }
     } catch (error) {
-      // Signaling server not running, use localStorage for same-machine testing
-      console.log('⚠️  Signaling server not detected. Using localStorage for same-machine testing.');
-      ips = [{ address: 'localhost', interface: 'localhost', isPrimary: true }];
+      // Signaling server not running, get IPs from browser using WebRTC
+      console.log('⚠️  Signaling server not detected. Detecting local IPs from browser...');
+      ips = await this.getLocalIPsFromBrowser();
     }
 
     // Initialize WebRTC
@@ -303,5 +303,70 @@ export class NetworkManager {
 
   sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async getLocalIPsFromBrowser() {
+    // Use WebRTC to discover local IP addresses
+    return new Promise((resolve) => {
+      const ips = [];
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+
+      // Create a dummy data channel
+      pc.createDataChannel('');
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          const candidate = event.candidate.candidate;
+
+          // Extract IP from candidate string
+          // Format: "candidate:... typ host" contains local IP
+          const ipRegex = /([0-9]{1,3}(\.[0-9]{1,3}){3})/;
+          const match = candidate.match(ipRegex);
+
+          if (match && match[1]) {
+            const ip = match[1];
+            // Skip localhost
+            if (ip !== '127.0.0.1' && !ips.find(i => i.address === ip)) {
+              // Check if it's a private IP (likely LAN)
+              const isPrivate = ip.startsWith('192.168.') ||
+                              ip.startsWith('10.') ||
+                              ip.startsWith('172.');
+
+              if (isPrivate) {
+                ips.push({
+                  address: ip,
+                  interface: 'WebRTC',
+                  isPrimary: ips.length === 0 // First one is primary
+                });
+              }
+            }
+          }
+        }
+      };
+
+      // Create offer to trigger ICE gathering
+      pc.createOffer()
+        .then(offer => pc.setLocalDescription(offer))
+        .catch(() => {});
+
+      // Give it 2 seconds to gather IPs, then resolve
+      setTimeout(() => {
+        pc.close();
+
+        if (ips.length === 0) {
+          // Fallback to localhost if no IPs found
+          ips.push({
+            address: 'localhost',
+            interface: 'localhost',
+            isPrimary: true
+          });
+        }
+
+        console.log('📍 Detected local IPs:', ips.map(i => i.address).join(', '));
+        resolve(ips);
+      }, 2000);
+    });
   }
 }
