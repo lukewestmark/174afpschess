@@ -11,19 +11,23 @@ export class WebRTCConnection {
     this.remoteDescriptionSet = false;
     this.remoteUfrag = null;
 
+    const defaultIceServers = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun.l.google.com:5349' },
+      { urls: 'stun:stun1.l.google.com:3478' },
+      { urls: 'stun:stun1.l.google.com:5349' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:5349' },
+      { urls: 'stun:stun3.l.google.com:3478' },
+      { urls: 'stun:stun3.l.google.com:5349' },
+      { urls: 'stun:stun4.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:5349' }
+    ];
+
+    const customIceServers = this.getCustomIceServers();
+
     this.config = {
-      iceServers:[
-          { urls: "stun:stun.l.google.com:19302" },
-          { urls: "stun:stun.l.google.com:5349" },
-          { urls: "stun:stun1.l.google.com:3478" },
-          { urls: "stun:stun1.l.google.com:5349" },
-          { urls: "stun:stun2.l.google.com:19302" },
-          { urls: "stun:stun2.l.google.com:5349" },
-          { urls: "stun:stun3.l.google.com:3478" },
-          { urls: "stun:stun3.l.google.com:5349" },
-          { urls: "stun:stun4.l.google.com:19302" },
-          { urls: "stun:stun4.l.google.com:5349" }
-      ],
+      iceServers: customIceServers || defaultIceServers,
       iceCandidatePoolSize: 10
     };
   }
@@ -256,6 +260,28 @@ export class WebRTCConnection {
     for (const candidate of queue) {
       await this.addIceCandidate(candidate);
     }
+  }
+
+  getCustomIceServers() {
+    // Allow specifying TURN/STUN servers via window.TURN_CONFIG or localStorage.turn_config
+    try {
+      const globalConfig = typeof window !== 'undefined' ? window.TURN_CONFIG : null;
+      if (globalConfig?.iceServers) {
+        return globalConfig.iceServers;
+      }
+
+      const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('turn_config') : null;
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.iceServers) {
+          return parsed.iceServers;
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to load custom ICE servers:', error);
+    }
+
+    return null;
   }
 
   extractRemoteUfrag(sdp) {
