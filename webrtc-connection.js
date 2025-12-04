@@ -33,11 +33,9 @@ export class WebRTCConnection {
     if (sanitizedCustomIce && sanitizedCustomIce.length > 0) {
       iceServers = sanitizedCustomIce;
     } else if (customIceConfig?.iceTransportPolicy === 'relay') {
-      // Honor relay-only request even if sanitization failed—do NOT fall back to STUN
-      iceServers = customIceConfig?.iceServers || [];
-      if (!iceServers.length) {
-        console.warn('Relay-only requested but no valid ICE servers supplied; using empty list (no STUN fallback).');
-      }
+      // Relay-only requested but nothing valid: use empty list (no STUN) to avoid invalid URLs
+      iceServers = [];
+      console.warn('Relay-only requested but no valid ICE servers supplied after sanitizing; using empty list (no STUN fallback).');
     } else {
       iceServers = this.defaultIceServers;
       iceTransportPolicy = undefined;
@@ -302,11 +300,23 @@ export class WebRTCConnection {
       const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
 
       // Only allow stun/turn/turns schemes, skip placeholders or malformed entries
-      const validUrls = urls.filter((u) => {
-        if (typeof u !== 'string') return false;
-        const trimmed = u.trim();
-        return (/^turns?:[^\\s<>]+$/i.test(trimmed)) || (/^stuns?:[^\\s<>]+$/i.test(trimmed));
-      });
+      const validUrls = urls
+        .map((u) => (typeof u === 'string' ? u.trim() : ''))
+        .filter((u) => {
+          if (!u) return false;
+          return /^turns?:[^\\s<>]+$/i.test(u) || /^stuns?:[^\\s<>]+$/i.test(u);
+        });
+
+      // If a TURN URL is present, prefer TCP variants first to honor relay-over-TCP configs
+      const turnUrls = validUrls.filter((u) => /^turns?:/i.test(u));
+      if (turnUrls.length > 0) {
+        const tcpFirst = [
+          ...turnUrls.filter((u) => u.toLowerCase().includes('transport=tcp')),
+          ...turnUrls.filter((u) => !u.toLowerCase().includes('transport=tcp'))
+        ];
+        normalized.push({ ...server, urls: tcpFirst });
+        continue;
+      }
 
       if (validUrls.length === 0) continue;
 
