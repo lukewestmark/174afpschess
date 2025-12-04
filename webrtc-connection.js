@@ -5,9 +5,11 @@ export class WebRTCConnection {
     this.reliableChannel = null;
     this.unreliableChannel = null;
     this.iceCandidates = [];
+    this.pendingIceCandidates = []; // Queue for candidates received before remote description
     this.messageCallback = null;
     this.connectionStateCallback = null;
     this.remoteDescriptionSet = false;
+    this.remoteUfrag = null;
 
     this.config = {
       iceServers: [
@@ -27,6 +29,15 @@ export class WebRTCConnection {
         this.iceCandidates.push(event.candidate);
         console.log('🧊 ICE candidate generated:', event.candidate.candidate.substring(0, 50) + '...');
       }
+    };
+
+    this.peerConnection.onicecandidateerror = (event) => {
+      console.error('ICE candidate error:', {
+        errorCode: event.errorCode,
+        errorText: event.errorText,
+        url: event.url,
+        hostCandidate: event.hostCandidate
+      });
     };
 
     // Monitor connection state
@@ -124,8 +135,7 @@ export class WebRTCConnection {
       throw new Error('Peer connection not initialized');
     }
 
-    await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-    this.remoteDescriptionSet = true;
+    await this.setRemoteDescription(offer);
 
     const answer = await this.peerConnection.createAnswer();
     await this.peerConnection.setLocalDescription(answer);
@@ -141,7 +151,10 @@ export class WebRTCConnection {
 
     await this.peerConnection.setRemoteDescription(new RTCSessionDescription(description));
     this.remoteDescriptionSet = true;
+    this.remoteUfrag = this.extractRemoteUfrag(this.peerConnection.remoteDescription?.sdp);
     console.log('📥 Set remote description');
+
+    await this.flushPendingIceCandidates();
   }
 
   async addIceCandidate(candidate) {
@@ -149,10 +162,17 @@ export class WebRTCConnection {
       throw new Error('Peer connection not initialized');
     }
 
+    if (!candidate) return;
+
+    // Drop candidates that belong to a different ICE username fragment (stale session)
+    if (this.remoteUfrag && candidate.usernameFragment && candidate.usernameFragment !== this.remoteUfrag) {
+      console.warn(`Skipping ICE candidate with stale ufrag (${candidate.usernameFragment}), expected ${this.remoteUfrag}`);
+      return;
+    }
+
     if (!this.remoteDescriptionSet) {
       console.log('⏳ Queueing ICE candidate (waiting for remote description)');
-      // Queue the candidate to be added after remote description is set
-      setTimeout(() => this.addIceCandidate(candidate), 100);
+      this.pendingIceCandidates.push(candidate);
       return;
     }
 
@@ -213,6 +233,26 @@ export class WebRTCConnection {
     if (this.peerConnection) {
       this.peerConnection.close();
     }
+    this.pendingIceCandidates = [];
     console.log('🛑 WebRTC connection closed');
+  }
+
+  async flushPendingIceCandidates() {
+    if (!this.remoteDescriptionSet || this.pendingIceCandidates.length === 0) {
+      return;
+    }
+
+    const queue = [...this.pendingIceCandidates];
+    this.pendingIceCandidates = [];
+
+    for (const candidate of queue) {
+      await this.addIceCandidate(candidate);
+    }
+  }
+
+  extractRemoteUfrag(sdp) {
+    if (!sdp) return null;
+    const match = sdp.match(/a=ice-ufrag:([^\r\n]+)/);
+    return match ? match[1] : null;
   }
 }

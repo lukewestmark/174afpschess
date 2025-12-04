@@ -9,12 +9,17 @@ export class NetworkManager {
     this.connectionStateCallback = null;
     this.icePollInterval = null;
     this.answerPollInterval = null;
+    this.lastIceIndexSent = 0;
   }
 
   async startHost(port = 8080) {
     if (!this.isHost) {
       throw new Error('Only host can start signaling server');
     }
+
+    // Clear any stale signaling artifacts from previous sessions
+    this.clearLocalSignalingData();
+    this.lastIceIndexSent = 0;
 
     console.log('🎮 Starting as HOST...');
 
@@ -98,6 +103,10 @@ export class NetworkManager {
     if (this.isHost) {
       throw new Error('Host cannot connect to another host');
     }
+
+    // Clear any stale signaling artifacts from previous sessions
+    this.clearLocalSignalingData();
+    this.lastIceIndexSent = 0;
 
     console.log(`🎮 Connecting to HOST at ${hostIP}:${port}...`);
 
@@ -210,19 +219,27 @@ export class NetworkManager {
       const candidates = this.connection.getIceCandidates();
       if (candidates.length === 0) return;
 
-      // Try HTTP first
-      fetch(`${baseUrl}/ice`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          candidate: candidates[candidates.length - 1], // Send latest
-          isHost: this.isHost
-        })
-      }).catch(() => {
-        // Fallback to localStorage
-        const stored = JSON.parse(localStorage.getItem(storageKey) || '[]');
-        stored.push(...candidates);
-        localStorage.setItem(storageKey, JSON.stringify(stored));
+      // Only send new candidates that haven't been sent yet
+      const newCandidates = candidates.slice(this.lastIceIndexSent);
+      if (newCandidates.length === 0) return;
+
+      this.lastIceIndexSent = candidates.length;
+
+      newCandidates.forEach((candidate) => {
+        // Try HTTP first
+        fetch(`${baseUrl}/ice`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            candidate,
+            isHost: this.isHost
+          })
+        }).catch(() => {
+          // Fallback to localStorage
+          const stored = JSON.parse(localStorage.getItem(storageKey) || '[]');
+          stored.push(candidate);
+          localStorage.setItem(storageKey, JSON.stringify(stored));
+        });
       });
     }, 1000);
 
@@ -293,10 +310,7 @@ export class NetworkManager {
     }
 
     // Clean up localStorage
-    localStorage.removeItem('webrtc_offer');
-    localStorage.removeItem('webrtc_answer');
-    localStorage.removeItem('webrtc_ice_host');
-    localStorage.removeItem('webrtc_ice_guest');
+    this.clearLocalSignalingData();
 
     console.log('👋 Disconnected');
   }
@@ -368,5 +382,13 @@ export class NetworkManager {
         resolve(ips);
       }, 2000);
     });
+  }
+
+  clearLocalSignalingData() {
+    localStorage.removeItem('webrtc_offer');
+    localStorage.removeItem('webrtc_answer');
+    localStorage.removeItem('webrtc_ice_host');
+    localStorage.removeItem('webrtc_ice_guest');
+    this.lastIceIndexSent = 0;
   }
 }

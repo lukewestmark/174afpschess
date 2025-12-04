@@ -112,9 +112,14 @@ export class SignalingServer {
       try {
         const data = JSON.parse(body);
         this.hostOffer = data.offer;
+        // Reset previous session state so stale ICE/answers don't leak into new connections
+        this.guestAnswer = null;
+        this.hostIceCandidates = [];
+        this.guestIceCandidates = [];
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
-        console.log('📥 Received offer from host');
+        console.log('📥 Received offer from host (signaling state reset)');
       } catch (error) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid JSON' }));
@@ -154,7 +159,8 @@ export class SignalingServer {
     const url = new URL(req.url, 'http://localhost');
     const isHost = url.searchParams.get('host') === 'true';
 
-    const candidates = isHost ? this.guestIceCandidates : this.hostIceCandidates;
+    const store = isHost ? this.guestIceCandidates : this.hostIceCandidates;
+    const candidates = store.splice(0, store.length); // return and clear
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ candidates }));
