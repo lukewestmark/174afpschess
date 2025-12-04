@@ -69,31 +69,6 @@ Once connected:
   - Click to shoot
   - Win the battle to win the square
 
-## ⚙️ Network Configuration (LAN-first)
-
-- Default mode is LAN host candidates (`iceTransportPolicy: "all"`) with no TURN required. Ensure both players are on the same subnet and can reach port 8080 on the host.
-- If you previously set a TURN override in `localStorage.turn_config`, clear it for LAN play:
-  ```js
-  localStorage.removeItem('turn_config');
-  location.reload();
-  ```
-- If you do need TURN later, set `localStorage.turn_config` or `window.TURN_CONFIG` before loading the page:
-  ```js
-  localStorage.setItem('turn_config', JSON.stringify({
-    iceServers: [
-      { urls: ['turn:YOUR_TURN_IP:3478?transport=udp', 'turn:YOUR_TURN_IP:3478?transport=tcp'], username: 'user', credential: 'pass' }
-    ],
-    iceTransportPolicy: 'relay'
-  }));
-  location.reload();
-  ```
-  Replace with your TURN host/IP/creds and open/forward the TURN ports if you’re not on LAN.
-
-### Firewall/Port Checklist (LAN)
-- Host must allow inbound TCP 8080 (signaling) on the host machine.
-- Browser must be allowed through OS firewall.
-- TURN not needed on LAN; leave it unset unless you’re crossing networks.
-
 ## 🎮 Controls
 
 ### Chess Mode
