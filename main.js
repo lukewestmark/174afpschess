@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ChessGame } from './chess.js';
 import { BattleArena } from './battle.js';
 
@@ -8,7 +9,6 @@ let playerColor = null;
 let isConnected = false;
 let currentRoomCode = null;
 
-// Use environment variable or default to localhost
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8080';
 
 function connectToServer() {
@@ -55,7 +55,6 @@ function handleServerMessage(message) {
       }
       updatePlayerStatus(message.gameState.players);
       showNotification(`Joined room: ${message.roomCode}`);
-      // Send initial board state
       ws.send(JSON.stringify({
         type: 'init',
         board: game.board,
@@ -72,15 +71,13 @@ function handleServerMessage(message) {
       updatePlayerStatus(message.state.players);
       break;
     
-    case 'startBattle':
-      // Determine if this player is the attacker or defender
+    case 'startBattle': {
       const isAttacker = playerColor === message.attackingPiece.color;
       battleFromRow = message.fromRow;
       battleFromCol = message.fromCol;
       battleToRow = message.toRow;
       battleToCol = message.toCol;
       
-      // Hide chess board
       boardGroup.visible = false;
       
       showNotification(isAttacker ? 'You are attacking! Win the battle!' : 'Defend yourself!');
@@ -94,9 +91,9 @@ function handleServerMessage(message) {
         }
       );
       break;
+    }
     
     case 'opponentUpdate':
-      // Update opponent's position and handle their shots
       if (battleArena.isActive()) {
         battleArena.updateOpponentPosition(message.position, message.rotation);
         
@@ -104,7 +101,6 @@ function handleServerMessage(message) {
           battleArena.handleOpponentShot(message.shot);
         }
         
-        // Update opponent health from their perspective (their health becomes our opponent health)
         if (message.health !== undefined) {
           battleArena.updateOpponentHealth(message.health);
         }
@@ -112,20 +108,21 @@ function handleServerMessage(message) {
       break;
     
     case 'battleEnded':
-      // Clean up battle arena first
       if (battleArena.isActive()) {
         battleArena.cleanup();
         battleArena.battleActive = false;
       }
       
-      // Update board after battle
       game.board = message.board;
       game.currentTurn = message.currentTurn;
       
-      // Show chess board again
+      if (message.gameOver) {
+        game.gameOver = message.gameOver;
+        game.winner = message.winner;
+      }
+      
       boardGroup.visible = true;
       
-      // Reset camera to chess view
       camera.position.set(0, 2, 5);
       camera.rotation.set(0, 0, 0);
       
@@ -133,6 +130,18 @@ function handleServerMessage(message) {
       
       const resultMsg = message.attackerWon ? 'Attacker won the battle!' : 'Defender won the battle!';
       showNotification(resultMsg);
+      
+      if (game.gameOver) {
+        const winnerText = game.winner === playerColor ? 'YOU WIN!' : 'YOU LOSE!';
+        setTimeout(() => {
+          showNotification(`GAME OVER! ${game.winner.toUpperCase()} WINS! ${winnerText}`);
+          setTimeout(() => {
+            if (confirm(`${game.winner.toUpperCase()} wins! Play again?`)) {
+              location.reload();
+            }
+          }, 2000);
+        }, 1500);
+      }
       break;
       
     case 'playerJoined':
@@ -165,7 +174,13 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
 scene.fog = new THREE.Fog(0x87ceeb, 10, 50);
 
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const camera = new THREE.PerspectiveCamera(
+  75,
+  window.innerWidth / window.innerHeight,
+  0.1,
+  1000
+);
+
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
@@ -194,7 +209,6 @@ const game = new ChessGame();
 
 // Battle arena
 const battleArena = new BattleArena(scene, camera);
-let pendingBattle = null;
 let battleFromRow = null;
 let battleFromCol = null;
 let battleToRow = null;
@@ -209,8 +223,16 @@ scene.add(boardGroup);
 // Create board squares
 const lightMaterial = new THREE.MeshStandardMaterial({ color: 0xf0d9b5 });
 const darkMaterial = new THREE.MeshStandardMaterial({ color: 0xb58863 });
-const selectedMaterial = new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0xaaaa00 });
-const validMoveMaterial = new THREE.MeshStandardMaterial({ color: 0x00ff00, emissive: 0x00aa00, transparent: true, opacity: 0.5 });
+const selectedMaterial = new THREE.MeshStandardMaterial({
+  color: 0xffff00,
+  emissive: 0xaaaa00
+});
+const validMoveMaterial = new THREE.MeshStandardMaterial({
+  color: 0x00ff00,
+  emissive: 0x00aa00,
+  transparent: true,
+  opacity: 0.5
+});
 
 const squares = [];
 for (let row = 0; row < 8; row++) {
@@ -227,77 +249,114 @@ for (let row = 0; row < 8; row++) {
   }
 }
 
-// Piece meshes
+// Piece meshes + materials
 const pieceMeshes = {};
 const whiteMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
 const blackMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
 
-function createPieceMesh(type, color) {
-  let geometry;
-  
-  switch (type) {
-    case 'pawn':
-      geometry = new THREE.CylinderGeometry(0.15, 0.2, 0.6, 16);
-      break;
-    case 'rook':
-      geometry = new THREE.BoxGeometry(0.4, 0.6, 0.4);
-      break;
-    case 'knight':
-      geometry = new THREE.ConeGeometry(0.2, 0.7, 8);
-      break;
-    case 'bishop':
-      geometry = new THREE.ConeGeometry(0.15, 0.8, 16);
-      break;
-    case 'queen':
-      geometry = new THREE.CylinderGeometry(0.15, 0.25, 0.8, 16);
-      break;
-    case 'king':
-      geometry = new THREE.CylinderGeometry(0.2, 0.25, 0.9, 16);
-      break;
+const gltfLoader = new GLTFLoader();
+
+const pieceModelPaths = {
+  pawn:  '/assets/Pawn/Pawn.glb',
+  rook:  '/assets/Rook/Rook.glb',
+  knight:'/assets/Knight/Knight.glb',
+  bishop:'/assets/Bishop/Bishop.glb',
+  queen: '/assets/Queen/Queen.glb',
+  king:  '/assets/King/King.glb'
+};
+
+const pieceModelCache = {};
+
+function getPieceTemplate(type, onLoad) {
+  const key = type.toLowerCase();
+  if (pieceModelCache[key]) {
+    onLoad(pieceModelCache[key]);
+    return;
   }
-  
-  const material = color === 'white' ? whiteMaterial : blackMaterial;
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.castShadow = true;
-  mesh.userData = { type, color };
-  
-  return mesh;
+
+  const path = pieceModelPaths[key];
+  if (!path) {
+    console.error('No model path for piece type:', type);
+    return;
+  }
+
+  gltfLoader.load(
+    path,
+    (gltf) => {
+      const template = gltf.scene;
+      pieceModelCache[key] = template;
+      onLoad(template);
+    },
+    undefined,
+    (err) => {
+      console.error('Error loading model', path, err);
+    }
+  );
+}
+
+function createPieceMesh(type, color) {
+  const root = new THREE.Group();
+  root.castShadow = true;
+  root.userData = { type, color };
+
+  const mat = color === 'white' ? whiteMaterial : blackMaterial;
+
+  getPieceTemplate(type, (template) => {
+    const model = template.clone(true);
+
+    model.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+        child.material = mat;
+      }
+    });
+
+    const scale = 18;
+    model.scale.set(scale, scale, scale);
+    model.position.y = 0;
+
+    root.add(model);
+  });
+
+  return root;
 }
 
 function updateBoard() {
-  // Clear existing pieces
   Object.values(pieceMeshes).forEach(mesh => {
     boardGroup.remove(mesh);
   });
+
+  for (const key in pieceMeshes) {
+    delete pieceMeshes[key];
+  }
   
-  // Reset square materials
   for (let row = 0; row < 8; row++) {
     for (let col = 0; col < 8; col++) {
       squares[row][col].material = squares[row][col].userData.originalMaterial;
     }
   }
   
-  // Highlight selected piece (only for current player)
   if (game.selectedPiece && playerColor === game.currentTurn) {
     const { row, col } = game.selectedPiece;
     squares[row][col].material = selectedMaterial;
     
-    // Highlight valid moves
     game.validMoves.forEach(move => {
       squares[move.row][move.col].material = validMoveMaterial;
     });
   }
   
-  // Add pieces
   for (let row = 0; row < 8; row++) {
     for (let col = 0; col < 8; col++) {
       const piece = game.getPiece(row, col);
       if (piece) {
         const key = `${row}-${col}`;
         const mesh = createPieceMesh(piece.type, piece.color);
-        mesh.position.set(col * squareSize - 3.5, 0.4, row * squareSize - 3.5);
+
+        mesh.position.set(col * squareSize - 3.5, 0.05, row * squareSize - 3.5);
         mesh.userData.row = row;
         mesh.userData.col = col;
+
         boardGroup.add(mesh);
         pieceMeshes[key] = mesh;
       }
@@ -524,11 +583,9 @@ function selectColor(color) {
 document.addEventListener('click', (e) => {
   if (!isPointerLocked) return;
   
-  // Handle shooting in battle mode
   if (battleArena.isActive()) {
     const shotData = battleArena.shoot();
     
-    // Send shot to server for other player
     if (shotData && isConnected) {
       const playerState = battleArena.getPlayerState();
       ws.send(JSON.stringify({
@@ -544,7 +601,11 @@ document.addEventListener('click', (e) => {
   
   if (!playerColor) return;
   
-  // Only allow moves on your turn
+  if (game.gameOver) {
+    showNotification('Game is over!');
+    return;
+  }
+  
   if (playerColor !== game.currentTurn) {
     showNotification("It's not your turn!");
     return;
@@ -552,7 +613,6 @@ document.addEventListener('click', (e) => {
   
   raycaster.setFromCamera({ x: 0, y: 0 }, camera);
   
-  // Check for square clicks
   const squareIntersects = raycaster.intersectObjects(
     squares.flat().concat(Object.values(pieceMeshes))
   );
@@ -565,7 +625,6 @@ document.addEventListener('click', (e) => {
       row = intersect.object.userData.row;
       col = intersect.object.userData.col;
     } else {
-      // Calculate from position
       const x = intersect.object.position.x + 3.5;
       const z = intersect.object.position.z + 3.5;
       col = Math.floor(x / squareSize);
@@ -577,12 +636,13 @@ document.addEventListener('click', (e) => {
     const isCapture = targetPiece && targetPiece.color !== playerColor && 
                      game.validMoves.some(m => m.row === row && m.col === col);
     
+    // CRITICAL FIX: Get the attacking piece BEFORE making the move
+    // because selectPiece() will move the piece and clear the original square
+    const attackingPiece = prevSelected ? game.getPiece(prevSelected.row, prevSelected.col) : null;
+    
     const moved = game.selectPiece(row, col);
     
     if (moved && isConnected) {
-      const attackingPiece = game.board[battleToRow || row][battleToCol || col];
-      
-      // Send move to server
       ws.send(JSON.stringify({
         type: 'move',
         fromRow: prevSelected.row,
@@ -592,7 +652,7 @@ document.addEventListener('click', (e) => {
         board: game.board,
         currentTurn: game.currentTurn,
         isCapture: isCapture,
-        attackingPiece: prevSelected.piece,
+        attackingPiece: attackingPiece,
         defendingPiece: targetPiece
       }));
     }
@@ -601,10 +661,8 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// Movement
 function updateMovement() {
   if (battleArena.isActive()) {
-    // Battle mode movement
     const forward = new THREE.Vector3();
     const right = new THREE.Vector3();
     
@@ -614,17 +672,15 @@ function updateMovement() {
     
     right.crossVectors(forward, new THREE.Vector3(0, 1, 0));
     
-    const moveSpeed = 0.15;
+    const moveSpeedBattle = 0.15;
     
-    if (keys['KeyW']) camera.position.addScaledVector(forward, moveSpeed);
-    if (keys['KeyS']) camera.position.addScaledVector(forward, -moveSpeed);
-    if (keys['KeyA']) camera.position.addScaledVector(right, -moveSpeed);
-    if (keys['KeyD']) camera.position.addScaledVector(right, moveSpeed);
+    if (keys['KeyW']) camera.position.addScaledVector(forward, moveSpeedBattle);
+    if (keys['KeyS']) camera.position.addScaledVector(forward, -moveSpeedBattle);
+    if (keys['KeyA']) camera.position.addScaledVector(right, -moveSpeedBattle);
+    if (keys['KeyD']) camera.position.addScaledVector(right, moveSpeedBattle);
     
-    // Constrain to arena
     battleArena.constrainPlayerMovement(camera.position);
   } else {
-    // Normal chess board movement
     const forward = new THREE.Vector3();
     const right = new THREE.Vector3();
     
@@ -641,28 +697,35 @@ function updateMovement() {
     if (keys['Space']) camera.position.y += moveSpeed;
     if (keys['ShiftLeft']) camera.position.y -= moveSpeed;
     
-    // Keep camera above ground
     camera.position.y = Math.max(0.5, camera.position.y);
   }
 }
 
 function handleBattleEnd(playerWon, isAttacker) {
-  // Determine actual winner based on attacker/defender
   const attackerWon = (isAttacker && playerWon) || (!isAttacker && !playerWon);
   
-  // Update board based on battle result
+  const defendingPiece = game.board[battleToRow][battleToCol];
+  const attackingPiece = game.board[battleFromRow][battleFromCol];
+  
   if (attackerWon) {
-    // Attacker wins - piece moves to new square
     game.board[battleToRow][battleToCol] = game.board[battleFromRow][battleFromCol];
     game.board[battleFromRow][battleFromCol] = null;
+    
+    if (defendingPiece && defendingPiece.type === 'king') {
+      game.gameOver = true;
+      game.winner = attackingPiece.color;
+    }
   } else {
-    // Defender wins - attacker is removed, defender stays
     game.board[battleFromRow][battleFromCol] = null;
+    
+    if (attackingPiece && attackingPiece.type === 'king') {
+      game.gameOver = true;
+      game.winner = defendingPiece.color;
+    }
   }
   
   game.currentTurn = game.currentTurn === 'white' ? 'black' : 'white';
   
-  // Send battle result to server
   if (isConnected) {
     ws.send(JSON.stringify({
       type: 'battleResult',
@@ -672,8 +735,21 @@ function handleBattleEnd(playerWon, isAttacker) {
       toRow: battleToRow,
       toCol: battleToCol,
       board: game.board,
-      currentTurn: game.currentTurn
+      currentTurn: game.currentTurn,
+      gameOver: game.gameOver,
+      winner: game.winner
     }));
+  }
+  
+  if (game.gameOver) {
+    const winnerText = game.winner === playerColor ? 'YOU WIN!' : 'YOU LOSE!';
+    showNotification(`GAME OVER! ${game.winner.toUpperCase()} WINS! ${winnerText}`);
+    
+    setTimeout(() => {
+      if (confirm(`${game.winner.toUpperCase()} wins! Play again?`)) {
+        location.reload();
+      }
+    }, 2000);
   }
 }
 
@@ -690,7 +766,6 @@ function animate() {
   
   updateMovement();
   
-  // Send position updates during battle (every 50ms)
   if (battleArena.isActive() && currentTime - lastNetworkUpdate > 50 && isConnected) {
     const playerState = battleArena.getPlayerState();
     ws.send(JSON.stringify({
@@ -703,7 +778,6 @@ function animate() {
     lastNetworkUpdate = currentTime;
   }
   
-  // Update battle if active
   let healthInfo = '';
   if (battleArena.isActive()) {
     const health = battleArena.updateBattle(deltaTime);
@@ -737,14 +811,12 @@ function animate() {
   renderer.render(scene, camera);
 }
 
-// Handle window resize
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// Start
 connectToServer();
 updateBoard();
 animate();

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 export class BattleArena {
   constructor(scene, camera) {
@@ -19,6 +20,71 @@ export class BattleArena {
     // Arena boundaries
     this.arenaSize = 20;
     this.arenaWalls = [];
+
+    // GLTF loader - NO CACHE
+    this.gltfLoader = new GLTFLoader();
+
+    // Paths for your models
+    this.pieceModelPaths = {
+      pawn:  '/assets/Pawn/Pawn.glb',
+      rook:  '/assets/Rook/Rook.glb',
+      knight:'/assets/Knight/Knight.glb',
+      bishop:'/assets/Bishop/Bishop.glb',
+      queen: '/assets/Queen/Queen.glb',
+      king:  '/assets/King/King.glb'
+    };
+  }
+
+  createBattlePiece(type, color, callback) {
+    const root = new THREE.Group();
+    const isWhite = color === 'white';
+    const targetColor = isWhite ? 0xffffff : 0x333333;
+
+    const path = this.pieceModelPaths[type.toLowerCase()];
+    if (!path) {
+      console.error('No model path for piece type in battle:', type);
+      return root;
+    }
+
+    // Load fresh each time, NO CACHING
+    this.gltfLoader.load(
+      path,
+      (gltf) => {
+        const model = gltf.scene;
+
+        model.traverse((child) => {
+          if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+            
+            // Create a completely new material for EACH mesh
+            // This ensures no material sharing between pieces
+            child.material = new THREE.MeshStandardMaterial({
+              color: targetColor,
+              metalness: 0.3,
+              roughness: 0.7
+            });
+          }
+        });
+
+        // Make pieces bigger for the arena
+        const scale = 48;
+        model.scale.set(scale, scale, scale);
+
+        // Move it down
+        model.position.y = -1.5;
+
+        root.add(model);
+        
+        if (callback) callback(root);
+      },
+      undefined,
+      (err) => {
+        console.error('Error loading battle model', path, err);
+      }
+    );
+
+    return root;
   }
 
   startBattle(playerPiece, opponentPiece, isAttacker, onBattleEnd) {
@@ -32,18 +98,17 @@ export class BattleArena {
     this.enemyBullets = [];
     this.onBattleEnd = onBattleEnd;
     
-    // Create arena
     this.createArena();
     
-    // Position players
+    // Position players with raised camera height
     if (isAttacker) {
-      this.camera.position.set(-8, 1.7, 0);
+      this.camera.position.set(-8, 1.6, 0);
       this.camera.rotation.set(0, Math.PI / 2, 0);
-      this.createOpponent(8, 1.7, 0);
+      this.createOpponent(8, 0, 0);
     } else {
-      this.camera.position.set(8, 1.7, 0);
+      this.camera.position.set(8, 1.6, 0);
       this.camera.rotation.set(0, -Math.PI / 2, 0);
-      this.createOpponent(-8, 1.7, 0);
+      this.createOpponent(-8, 0, 0);
     }
     
     return {
@@ -114,7 +179,6 @@ export class BattleArena {
     this.arenaGroup.add(westWall);
     this.arenaWalls.push(westWall);
     
-    // Add some cover objects
     this.addCover();
     
     this.scene.add(this.arenaGroup);
@@ -123,7 +187,6 @@ export class BattleArena {
   addCover() {
     const coverMaterial = new THREE.MeshStandardMaterial({ color: 0x555555 });
     
-    // Add some boxes for cover
     const positions = [
       [-4, 0.5, -4],
       [4, 0.5, 4],
@@ -146,15 +209,15 @@ export class BattleArena {
   }
 
   createOpponent(x, y, z) {
-    // Simple opponent representation
-    const geometry = new THREE.BoxGeometry(0.5, 1.8, 0.5);
-    const material = new THREE.MeshStandardMaterial({ 
-      color: this.opponentPiece.color === 'white' ? 0xffffff : 0x333333
+    const { type, color } = this.opponentPiece;
+
+    const root = this.createBattlePiece(type, color, (readyRoot) => {
+      readyRoot.position.set(x, y, z);
+      readyRoot.castShadow = true;
+      this.arenaGroup.add(readyRoot);
     });
-    this.opponent = new THREE.Mesh(geometry, material);
-    this.opponent.position.set(x, y, z);
-    this.opponent.castShadow = true;
-    this.arenaGroup.add(this.opponent);
+
+    this.opponent = root;
   }
 
   shoot() {
@@ -175,7 +238,6 @@ export class BattleArena {
     this.arenaGroup.add(bullet);
     this.bullets.push(bullet);
     
-    // Return shot data for networking
     return {
       position: bullet.position.clone(),
       velocity: bullet.userData.velocity.clone()
@@ -190,15 +252,12 @@ export class BattleArena {
       const bullet = this.bullets[i];
       bullet.position.add(bullet.userData.velocity);
       
-      // Check collision with opponent - just remove bullet, don't calculate damage
-      // Damage will be calculated by the opponent when they detect our bullet hitting them
       if (this.opponent && bullet.position.distanceTo(this.opponent.position) < 0.5) {
         this.arenaGroup.remove(bullet);
         this.bullets.splice(i, 1);
         continue;
       }
       
-      // Check collision with walls
       let hitWall = false;
       for (const wall of this.arenaWalls) {
         const box = new THREE.Box3().setFromObject(wall);
@@ -219,23 +278,20 @@ export class BattleArena {
       const bullet = this.enemyBullets[i];
       bullet.position.add(bullet.userData.velocity);
       
-      // Check collision with player - WE calculate damage to ourselves
       if (bullet.position.distanceTo(this.camera.position) < 0.5) {
         this.player1Health -= 20;
         this.arenaGroup.remove(bullet);
         this.enemyBullets.splice(i, 1);
         
-        // Check if player died - trigger battle end
         if (this.player1Health <= 0) {
-          this.player1Health = 0; // Clamp to 0
+          this.player1Health = 0;
           if (this.onBattleEnd) {
-            this.onBattleEnd(false); // Player lost
+            this.onBattleEnd(false);
           }
         }
         continue;
       }
       
-      // Check collision with walls
       let hitWall = false;
       for (const wall of this.arenaWalls) {
         const box = new THREE.Box3().setFromObject(wall);
@@ -260,7 +316,6 @@ export class BattleArena {
   endBattle(playerWon) {
     this.battleActive = false;
     
-    // Clean up
     this.scene.remove(this.arenaGroup);
     this.arenaGroup.clear();
     this.arenaWalls = [];
