@@ -9,22 +9,13 @@
 	</head>
 	<body>
 		<script>
-			// TURN configuration for the browser. You can override by setting window.TURN_CONFIG
-			// before main.js loads, or by writing localStorage.turn_config (same shape).
+			// ICE configuration for the browser. On LAN we default to host candidates (no TURN).
+			// You can override by setting window.TURN_CONFIG before main.js loads, or by
+			// writing localStorage.turn_config (same shape).
 			(() => {
-				const host = window.location.hostname || 'localhost';
-				const defaultTurn = {
-					iceServers: [
-						{
-							urls: [
-								`turn:${host}:3478?transport=udp`,
-								`turn:${host}:3478?transport=tcp`
-							],
-							username: 'user',
-							credential: 'pass'
-						}
-					],
-					iceTransportPolicy: 'relay'
+				const defaultIce = {
+					iceServers: [],
+					iceTransportPolicy: 'all'
 				};
 
 				// Respect existing config
@@ -35,10 +26,10 @@
 							window.TURN_CONFIG = JSON.parse(stored);
 						} catch (_) {
 							console.warn('Failed to parse turn_config from localStorage, using defaults.');
-							window.TURN_CONFIG = defaultTurn;
+							window.TURN_CONFIG = defaultIce;
 						}
 					} else {
-						window.TURN_CONFIG = defaultTurn;
+						window.TURN_CONFIG = defaultIce;
 					}
 				}
 
