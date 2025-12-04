@@ -203,7 +203,7 @@ export class WebRTCConnection {
       throw new Error('Peer connection not initialized');
     }
 
-    if (!candidate) return;
+    if (!candidate || !candidate.candidate) return;
 
     // Drop candidates that belong to a different ICE username fragment (stale session)
     if (this.remoteUfrag && candidate.usernameFragment && candidate.usernameFragment !== this.remoteUfrag) {

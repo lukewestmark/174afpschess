@@ -226,6 +226,10 @@ export class NetworkManager {
       this.lastIceIndexSent = candidates.length;
 
       newCandidates.forEach((candidate) => {
+        if (!candidate?.candidate) {
+          // Skip empty end-of-candidates notifications
+          return;
+        }
         console.log(`[ICE] Sending ${this.isHost ? 'host' : 'guest'} candidate`, candidate.candidate || '');
         // Try HTTP first
         fetch(`${baseUrl}/ice`, {
@@ -266,6 +270,10 @@ export class NetworkManager {
 
       // Add candidates to connection
       for (const candidate of candidates) {
+        if (!candidate?.candidate) {
+          // Skip empty end-of-candidates notifications
+          continue;
+        }
         console.log(`[ICE] Received ${this.isHost ? 'guest' : 'host'} candidate`, candidate.candidate || '');
         await this.connection.addIceCandidate(candidate);
       }
