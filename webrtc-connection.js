@@ -218,6 +218,7 @@ export class WebRTCConnection {
     }
 
     try {
+      console.log('Adding ICE candidate:', this.describeCandidate(candidate), candidate.candidate || '');
       await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
       console.log('📥 Added ICE candidate');
     } catch (error) {

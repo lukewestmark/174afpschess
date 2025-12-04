@@ -179,13 +179,14 @@ export class SignalingServer {
         const fallbackIp = isHost ? this.primaryHostIp : clientIp;
 
         const candidate = this.sanitizeCandidate(data.candidate, fallbackIp);
+        const desc = this.describeCandidate(candidate?.candidate);
 
         if (isHost) {
           this.hostIceCandidates.push(candidate);
-          console.log(`📤 Stored host ICE candidate (total: ${this.hostIceCandidates.length})`);
+          console.log(`📤 Stored host ICE candidate (total: ${this.hostIceCandidates.length}) ${desc}`);
         } else {
           this.guestIceCandidates.push(candidate);
-          console.log(`📥 Stored guest ICE candidate (total: ${this.guestIceCandidates.length})`);
+          console.log(`📥 Stored guest ICE candidate (total: ${this.guestIceCandidates.length}) ${desc}`);
         }
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -248,5 +249,20 @@ export class SignalingServer {
       return ip.replace('::ffff:', '');
     }
     return ip;
+  }
+
+  describeCandidate(cand) {
+    try {
+      if (!cand) return '';
+      const parts = cand.split(' ');
+      const address = parts[4];
+      const protocol = parts[2];
+      const port = parts[5];
+      const typeIndex = parts.indexOf('typ');
+      const typ = typeIndex >= 0 ? parts[typeIndex + 1] : 'unknown';
+      return `[${typ} ${protocol} ${address}:${port}]`;
+    } catch {
+      return '';
+    }
   }
 }

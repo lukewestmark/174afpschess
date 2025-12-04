@@ -5,7 +5,7 @@
   "main": "main.js",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "PORT=3000 vite",
     "build": "vite build",
     "preview": "vite preview",
     "signaling": "node start-signaling.js",

@@ -8,6 +8,50 @@
 		</style>
 	</head>
 	<body>
+		<script>
+			// TURN configuration for the browser. You can override by setting window.TURN_CONFIG
+			// before main.js loads, or by writing localStorage.turn_config (same shape).
+			(() => {
+				const host = window.location.hostname || 'localhost';
+				const defaultTurn = {
+					iceServers: [
+						{
+							urls: [
+								`turn:${host}:3478?transport=udp`,
+								`turn:${host}:3478?transport=tcp`
+							],
+							username: 'user',
+							credential: 'pass'
+						}
+					],
+					iceTransportPolicy: 'relay'
+				};
+
+				// Respect existing config
+				if (!window.TURN_CONFIG) {
+					const stored = localStorage.getItem('turn_config');
+					if (stored) {
+						try {
+							window.TURN_CONFIG = JSON.parse(stored);
+						} catch (_) {
+							console.warn('Failed to parse turn_config from localStorage, using defaults.');
+							window.TURN_CONFIG = defaultTurn;
+						}
+					} else {
+						window.TURN_CONFIG = defaultTurn;
+					}
+				}
+
+				// Persist so host/guest stay in sync on reload
+				try {
+					localStorage.setItem('turn_config', JSON.stringify(window.TURN_CONFIG));
+				} catch (err) {
+					console.warn('Unable to persist TURN config to localStorage:', err);
+				}
+
+				console.log('TURN config (edit in index.html or localStorage.turn_config):', window.TURN_CONFIG);
+			})();
+		</script>
 		<script type="module" src="/main.js"></script>
 	</body>
 </html>

@@ -226,6 +226,7 @@ export class NetworkManager {
       this.lastIceIndexSent = candidates.length;
 
       newCandidates.forEach((candidate) => {
+        console.log(`[ICE] Sending ${this.isHost ? 'host' : 'guest'} candidate`, candidate.candidate || '');
         // Try HTTP first
         fetch(`${baseUrl}/ice`, {
           method: 'POST',
@@ -265,6 +266,7 @@ export class NetworkManager {
 
       // Add candidates to connection
       for (const candidate of candidates) {
+        console.log(`[ICE] Received ${this.isHost ? 'guest' : 'host'} candidate`, candidate.candidate || '');
         await this.connection.addIceCandidate(candidate);
       }
 
