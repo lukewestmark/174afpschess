@@ -9,6 +9,7 @@ export class SignalingServer {
     this.hostIceCandidates = [];
     this.guestIceCandidates = [];
     this.connected = false;
+    this.primaryHostIp = null;
   }
 
   getLocalIPs() {
@@ -74,6 +75,7 @@ export class SignalingServer {
 
       this.server.listen(port, () => {
         const ips = this.getLocalIPs();
+        this.primaryHostIp = (ips.find(ip => ip.isPrimary) || ips[0] || {}).address || null;
         console.log(`\n🚀 Signaling server running on port ${port}`);
         console.log('\n📡 Local IP addresses:');
         ips.forEach(ip => {
@@ -173,12 +175,16 @@ export class SignalingServer {
       try {
         const data = JSON.parse(body);
         const isHost = data.isHost === true;
+        const clientIp = this.cleanIp(req.socket.remoteAddress);
+        const fallbackIp = isHost ? this.primaryHostIp : clientIp;
+
+        const candidate = this.sanitizeCandidate(data.candidate, fallbackIp);
 
         if (isHost) {
-          this.hostIceCandidates.push(data.candidate);
+          this.hostIceCandidates.push(candidate);
           console.log(`📤 Stored host ICE candidate (total: ${this.hostIceCandidates.length})`);
         } else {
-          this.guestIceCandidates.push(data.candidate);
+          this.guestIceCandidates.push(candidate);
           console.log(`📥 Stored guest ICE candidate (total: ${this.guestIceCandidates.length})`);
         }
 
@@ -212,5 +218,35 @@ export class SignalingServer {
         console.log('🛑 Signaling server shut down');
       });
     }
+  }
+
+  sanitizeCandidate(candidate, fallbackIp) {
+    if (!candidate || !candidate.candidate || !fallbackIp) {
+      return candidate;
+    }
+
+    // Only rewrite mDNS/obfuscated hostnames
+    if (!candidate.candidate.includes('.local')) {
+      return candidate;
+    }
+
+    const parts = candidate.candidate.split(' ');
+    if (parts.length < 6) {
+      return candidate;
+    }
+
+    // SDP grammar: foundation component protocol priority address port typ ...
+    parts[4] = fallbackIp;
+
+    return { ...candidate, candidate: parts.join(' ') };
+  }
+
+  cleanIp(ip) {
+    if (!ip) return null;
+    // Strip IPv6-mapped IPv4 prefix
+    if (ip.startsWith('::ffff:')) {
+      return ip.replace('::ffff:', '');
+    }
+    return ip;
   }
 }
