@@ -27,10 +27,26 @@ export class WebRTCConnection {
     const customIceConfig = this.getCustomIceConfig();
     const sanitizedCustomIce = this.sanitizeIceServers(customIceConfig?.iceServers);
 
+    let iceServers;
+    let iceTransportPolicy = customIceConfig?.iceTransportPolicy;
+
+    if (sanitizedCustomIce && sanitizedCustomIce.length > 0) {
+      iceServers = sanitizedCustomIce;
+    } else if (customIceConfig?.iceTransportPolicy === 'relay') {
+      // Honor relay-only request even if sanitization failed—do NOT fall back to STUN
+      iceServers = customIceConfig?.iceServers || [];
+      if (!iceServers.length) {
+        console.warn('Relay-only requested but no valid ICE servers supplied; using empty list (no STUN fallback).');
+      }
+    } else {
+      iceServers = this.defaultIceServers;
+      iceTransportPolicy = undefined;
+    }
+
     this.config = {
-      iceServers: sanitizedCustomIce || this.defaultIceServers,
+      iceServers,
       iceCandidatePoolSize: 10,
-      ...(customIceConfig?.iceTransportPolicy ? { iceTransportPolicy: customIceConfig.iceTransportPolicy } : {})
+      ...(iceTransportPolicy ? { iceTransportPolicy } : {})
     };
   }
 
