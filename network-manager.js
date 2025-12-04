@@ -1,11 +1,10 @@
 import { WebRTCConnection } from './webrtc-connection.js';
-import { SignalingServer } from './signaling-server.js';
 
 export class NetworkManager {
   constructor(isHost) {
     this.isHost = isHost;
     this.connection = null;
-    this.signalingServer = null;
+    this.signalingServerUrl = null;
     this.messageCallback = null;
     this.connectionStateCallback = null;
     this.icePollInterval = null;
@@ -19,9 +18,24 @@ export class NetworkManager {
 
     console.log('🎮 Starting as HOST...');
 
-    // Start signaling server
-    this.signalingServer = new SignalingServer();
-    const ips = await this.signalingServer.start(port);
+    // In browser, we'll use a simple in-memory signaling approach
+    // Store offer/answer/ICE in localStorage for same-machine testing
+    // For real LAN, user needs to manually share connection data
+    this.signalingServerUrl = `http://localhost:${port}`;
+
+    // Get local IPs from a simple endpoint (if signaling server is running)
+    let ips = [];
+    try {
+      const response = await fetch(`${this.signalingServerUrl}/local-ips`);
+      if (response.ok) {
+        const data = await response.json();
+        ips = data.ips;
+      }
+    } catch (error) {
+      // Signaling server not running, use localStorage for same-machine testing
+      console.log('⚠️  Signaling server not detected. Using localStorage for same-machine testing.');
+      ips = [{ address: 'localhost', interface: 'localhost', isPrimary: true }];
+    }
 
     // Initialize WebRTC
     this.connection = new WebRTCConnection(true);
@@ -51,15 +65,33 @@ export class NetworkManager {
 
     // Create offer
     const offer = await this.connection.createOffer();
-    this.signalingServer.setOffer(offer);
+
+    // Store offer for signaling
+    await this.storeOffer(offer);
 
     // Poll for answer from guest
     this.waitForAnswer();
 
     // Start ICE candidate exchange
-    this.startIceCandidateExchange(`http://localhost:${port}`);
+    this.startIceCandidateExchange(this.signalingServerUrl);
 
     return ips;
+  }
+
+  async storeOffer(offer) {
+    // Try HTTP signaling first
+    try {
+      await fetch(`${this.signalingServerUrl}/offer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ offer })
+      });
+      console.log('📤 Offer stored on signaling server');
+    } catch (error) {
+      // Fallback to localStorage for same-machine testing
+      localStorage.setItem('webrtc_offer', JSON.stringify(offer));
+      console.log('📤 Offer stored in localStorage');
+    }
   }
 
   async connectToHost(hostIP, port = 8080) {
@@ -96,13 +128,18 @@ export class NetworkManager {
     const answer = await this.connection.createAnswer(offer);
 
     // Send answer to host
-    await fetch(`${baseUrl}/answer`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ answer })
-    });
-
-    console.log('📤 Sent answer to host');
+    try {
+      await fetch(`${baseUrl}/answer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answer })
+      });
+      console.log('📤 Sent answer to host (HTTP)');
+    } catch (error) {
+      // Fallback to localStorage
+      localStorage.setItem('webrtc_answer', JSON.stringify(answer));
+      console.log('📤 Sent answer to host (localStorage)');
+    }
 
     // Start ICE candidate exchange
     this.startIceCandidateExchange(baseUrl);
@@ -114,12 +151,18 @@ export class NetworkManager {
         const response = await fetch(`${baseUrl}/offer`);
         if (response.ok) {
           const data = await response.json();
-          console.log('📥 Received offer from host');
+          console.log('📥 Received offer from host (HTTP)');
           return data.offer;
         } else if (response.status === 503) {
           console.log(`⏳ Waiting for host offer... (attempt ${i + 1}/${maxRetries})`);
         }
       } catch (error) {
+        // Try localStorage fallback
+        const offerStr = localStorage.getItem('webrtc_offer');
+        if (offerStr) {
+          console.log('📥 Received offer from host (localStorage)');
+          return JSON.parse(offerStr);
+        }
         console.log(`⏳ Host not ready... (attempt ${i + 1}/${maxRetries})`);
       }
 
@@ -131,7 +174,24 @@ export class NetworkManager {
 
   waitForAnswer() {
     this.answerPollInterval = setInterval(async () => {
-      const answer = this.signalingServer.getAnswer();
+      let answer = null;
+
+      // Try HTTP first
+      try {
+        const response = await fetch(`${this.signalingServerUrl}/answer`);
+        if (response.ok) {
+          const data = await response.json();
+          answer = data.answer;
+        }
+      } catch (error) {
+        // Try localStorage fallback
+        const answerStr = localStorage.getItem('webrtc_answer');
+        if (answerStr) {
+          answer = JSON.parse(answerStr);
+          localStorage.removeItem('webrtc_answer'); // Consume it
+        }
+      }
+
       if (answer) {
         console.log('📥 Received answer from guest');
         await this.connection.setRemoteDescription(answer);
@@ -142,42 +202,59 @@ export class NetworkManager {
   }
 
   startIceCandidateExchange(baseUrl) {
+    const storageKey = this.isHost ? 'webrtc_ice_host' : 'webrtc_ice_guest';
+    const opponentKey = this.isHost ? 'webrtc_ice_guest' : 'webrtc_ice_host';
+
     // Send our ICE candidates
     setInterval(() => {
       const candidates = this.connection.getIceCandidates();
-      candidates.forEach(async (candidate) => {
-        try {
-          await fetch(`${baseUrl}/ice`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              candidate: candidate,
-              isHost: this.isHost
-            })
-          });
-        } catch (error) {
-          // Silently fail - signaling server might be shut down
-        }
+      if (candidates.length === 0) return;
+
+      // Try HTTP first
+      fetch(`${baseUrl}/ice`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          candidate: candidates[candidates.length - 1], // Send latest
+          isHost: this.isHost
+        })
+      }).catch(() => {
+        // Fallback to localStorage
+        const stored = JSON.parse(localStorage.getItem(storageKey) || '[]');
+        stored.push(...candidates);
+        localStorage.setItem(storageKey, JSON.stringify(stored));
       });
     }, 1000);
 
     // Fetch opponent's ICE candidates
     this.icePollInterval = setInterval(async () => {
+      let candidates = [];
+
+      // Try HTTP first
       try {
         const response = await fetch(`${baseUrl}/ice?host=${this.isHost}`);
         if (response.ok) {
           const data = await response.json();
-          for (const candidate of data.candidates) {
-            await this.connection.addIceCandidate(candidate);
-          }
+          candidates = data.candidates;
         }
       } catch (error) {
-        // Silently fail - signaling server might be shut down
-        if (this.connection?.isConnected()) {
-          // Connection established, can stop polling
-          clearInterval(this.icePollInterval);
-          this.icePollInterval = null;
+        // Fallback to localStorage
+        const stored = localStorage.getItem(opponentKey);
+        if (stored) {
+          candidates = JSON.parse(stored);
+          localStorage.removeItem(opponentKey); // Consume them
         }
+      }
+
+      // Add candidates to connection
+      for (const candidate of candidates) {
+        await this.connection.addIceCandidate(candidate);
+      }
+
+      // Stop polling if connected
+      if (this.connection?.isConnected()) {
+        clearInterval(this.icePollInterval);
+        this.icePollInterval = null;
       }
     }, 1000);
   }
@@ -214,9 +291,13 @@ export class NetworkManager {
     if (this.connection) {
       this.connection.close();
     }
-    if (this.signalingServer) {
-      this.signalingServer.shutdown();
-    }
+
+    // Clean up localStorage
+    localStorage.removeItem('webrtc_offer');
+    localStorage.removeItem('webrtc_answer');
+    localStorage.removeItem('webrtc_ice_host');
+    localStorage.removeItem('webrtc_ice_guest');
+
     console.log('👋 Disconnected');
   }
 

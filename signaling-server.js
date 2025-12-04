@@ -51,6 +51,10 @@ export class SignalingServer {
 
         if (url.pathname === '/offer' && req.method === 'GET') {
           this.handleGetOffer(req, res);
+        } else if (url.pathname === '/offer' && req.method === 'POST') {
+          this.handlePostOffer(req, res);
+        } else if (url.pathname === '/answer' && req.method === 'GET') {
+          this.handleGetAnswer(req, res);
         } else if (url.pathname === '/answer' && req.method === 'POST') {
           this.handlePostAnswer(req, res);
         } else if (url.pathname === '/ice' && req.method === 'GET') {
@@ -98,6 +102,34 @@ export class SignalingServer {
     } else {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Offer not ready yet' }));
+    }
+  }
+
+  handlePostOffer(req, res) {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        this.hostOffer = data.offer;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+        console.log('📥 Received offer from host');
+      } catch (error) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      }
+    });
+  }
+
+  handleGetAnswer(req, res) {
+    if (this.guestAnswer) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ answer: this.guestAnswer }));
+      console.log('📤 Sent answer to host');
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Answer not ready yet' }));
     }
   }
 
