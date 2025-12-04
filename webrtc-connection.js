@@ -10,6 +10,7 @@ export class WebRTCConnection {
     this.connectionStateCallback = null;
     this.remoteDescriptionSet = false;
     this.remoteUfrag = null;
+    this.configDebugLogged = false;
     this.defaultIceServers = [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun.l.google.com:5349' },
@@ -23,12 +24,13 @@ export class WebRTCConnection {
       { urls: 'stun:stun4.l.google.com:5349' }
     ];
 
-    const customIceServers = this.getCustomIceServers();
-    const sanitizedCustomIce = this.sanitizeIceServers(customIceServers);
+    const customIceConfig = this.getCustomIceConfig();
+    const sanitizedCustomIce = this.sanitizeIceServers(customIceConfig?.iceServers);
 
     this.config = {
       iceServers: sanitizedCustomIce || this.defaultIceServers,
-      iceCandidatePoolSize: 10
+      iceCandidatePoolSize: 10,
+      ...(customIceConfig?.iceTransportPolicy ? { iceTransportPolicy: customIceConfig.iceTransportPolicy } : {})
     };
   }
 
@@ -45,7 +47,7 @@ export class WebRTCConnection {
     this.peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
         this.iceCandidates.push(event.candidate);
-        console.log('🧊 ICE candidate generated:', event.candidate.candidate.substring(0, 50) + '...');
+        console.log('🧊 ICE candidate generated:', this.describeCandidate(event.candidate));
       }
     };
 
@@ -278,10 +280,11 @@ export class WebRTCConnection {
       const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
 
       // Only allow stun/turn/turns schemes, skip placeholders or malformed entries
-      const validUrls = urls.filter((u) =>
-        typeof u === 'string' &&
-        /^[tT]urns?:[^\\s<>]+$/.test(u) || /^[sS]tuns?:[^\\s<>]+$/.test(u)
-      );
+      const validUrls = urls.filter((u) => {
+        if (typeof u !== 'string') return false;
+        const trimmed = u.trim();
+        return /^turns?:[^\\s<>]+$/i.test(trimmed) || /^stuns?:[^\\s<>]+$/i.test(trimmed);
+      });
 
       if (validUrls.length === 0) continue;
 
@@ -299,14 +302,14 @@ export class WebRTCConnection {
     try {
       const globalConfig = typeof window !== 'undefined' ? window.TURN_CONFIG : null;
       if (globalConfig?.iceServers) {
-        return globalConfig.iceServers;
+        return globalConfig;
       }
 
       const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('turn_config') : null;
       if (stored) {
         const parsed = JSON.parse(stored);
         if (parsed?.iceServers) {
-          return parsed.iceServers;
+          return parsed;
         }
       }
     } catch (error) {
@@ -320,5 +323,24 @@ export class WebRTCConnection {
     if (!sdp) return null;
     const match = sdp.match(/a=ice-ufrag:([^\r\n]+)/);
     return match ? match[1] : null;
+  }
+
+  getCustomIceConfig() {
+    return this.getCustomIceServers();
+  }
+
+  describeCandidate(candidate) {
+    try {
+      const cand = candidate.candidate || '';
+      const parts = cand.split(' ');
+      const address = parts[4];
+      const protocol = parts[2];
+      const port = parts[5];
+      const typeIndex = parts.indexOf('typ');
+      const typ = typeIndex >= 0 ? parts[typeIndex + 1] : 'unknown';
+      return `${typ} ${protocol} ${address}:${port}`;
+    } catch (e) {
+      return candidate.candidate;
+    }
   }
 }
