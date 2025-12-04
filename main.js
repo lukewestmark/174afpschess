@@ -82,9 +82,15 @@ function handleServerMessage(message) {
       
       showNotification(isAttacker ? 'You are attacking! Win the battle!' : 'Defend yourself!');
       
+      // CRITICAL FIX: For the defender, swap the pieces so they see their own piece correctly
+      // Attacker sees: their piece (attacking) vs opponent piece (defending)
+      // Defender sees: their piece (defending) vs opponent piece (attacking)
+      const myPiece = isAttacker ? message.attackingPiece : message.defendingPiece;
+      const enemyPiece = isAttacker ? message.defendingPiece : message.attackingPiece;
+      
       battleArena.startBattle(
-        message.attackingPiece,
-        message.defendingPiece,
+        myPiece,
+        enemyPiece,
         isAttacker,
         (playerWon) => {
           handleBattleEnd(playerWon, isAttacker);
