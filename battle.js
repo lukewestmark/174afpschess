@@ -25,6 +25,31 @@ export class BattleArena {
     // GLTF loader - NO CACHE
     this.gltfLoader = new GLTFLoader();
 
+    // TextureLoader initialization
+    this.textureLoader = new THREE.TextureLoader();
+
+    // Texture path configuration
+    this.texturePaths = {
+      grass: {
+        diffuse: '/assets/textures/grass/grass_diffuse.jpg',
+        normal: '/assets/textures/grass/grass_normal.png',
+        roughness: '/assets/textures/grass/grass_roughness.png'
+      },
+      wall: {
+        diffuse: '/assets/textures/wall/wall_diffuse.jpg',
+        normal: '/assets/textures/wall/wall_normal.png',
+        roughness: '/assets/textures/wall/wall_roughness.png'
+      },
+      metal: {
+        diffuse: '/assets/textures/metal/metal_diffuse.jpg',
+        normal: '/assets/textures/metal/metal_normal.png',
+        roughness: '/assets/textures/metal/metal_roughness.png'
+      }
+    };
+
+    // Texture cache
+    this.loadedTextures = {};
+
     // Paths for your models
     this.pieceModelPaths = {
       pawn:  '/assets/Pawn/Pawn.glb',
@@ -122,18 +147,104 @@ export class BattleArena {
     };
   }
 
+  loadTexture(path, onLoad, onError) {
+    if (this.loadedTextures[path]) {
+      if (onLoad) onLoad(this.loadedTextures[path]);
+      return this.loadedTextures[path];
+    }
+
+    const texture = this.textureLoader.load(
+      path,
+      (tex) => {
+        this.loadedTextures[path] = tex;
+        console.log('Texture loaded:', path);
+        if (onLoad) onLoad(tex);
+      },
+      undefined,
+      (error) => {
+        console.error('Error loading texture:', path, error);
+        if (onError) onError(error);
+      }
+    );
+
+    return texture;
+  }
+
+  loadMaterialTextures(materialType, callback) {
+    const paths = this.texturePaths[materialType];
+    const textures = {};
+    let loadedCount = 0;
+    const totalTextures = Object.keys(paths).length;
+
+    Object.keys(paths).forEach(mapType => {
+      this.loadTexture(
+        paths[mapType],
+        (texture) => {
+          textures[mapType] = texture;
+          loadedCount++;
+          if (loadedCount === totalTextures && callback) {
+            callback(textures);
+          }
+        },
+        (error) => {
+          console.warn(`Failed to load ${mapType} for ${materialType}`);
+          loadedCount++;
+          if (loadedCount === totalTextures && callback) {
+            callback(textures);
+          }
+        }
+      );
+    });
+  }
+
   createArena() {
-    // Floor
+    // Floor - Load textures first, create with placeholder material
     const floorGeometry = new THREE.PlaneGeometry(this.arenaSize, this.arenaSize);
-    const floorMaterial = new THREE.MeshStandardMaterial({ 
+
+    // Create placeholder material (will be replaced when textures load)
+    const floorMaterial = new THREE.MeshStandardMaterial({
       color: 0x444444,
       roughness: 0.8
     });
+
     const floor = new THREE.Mesh(floorGeometry, floorMaterial);
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = 0;
     floor.receiveShadow = true;
     this.arenaGroup.add(floor);
+
+    // Load grass textures asynchronously
+    this.loadMaterialTextures('grass', (textures) => {
+      // Configure texture wrapping and repeat for tiling
+      Object.values(textures).forEach(texture => {
+        if (texture) {
+          texture.wrapS = THREE.RepeatWrapping;
+          texture.wrapT = THREE.RepeatWrapping;
+          // Repeat 4x4 times across the 20x20 unit floor (5 units per repeat)
+          texture.repeat.set(4, 4);
+        }
+      });
+
+      // Update material with loaded textures
+      floor.material.map = textures.diffuse || null;
+      floor.material.normalMap = textures.normal || null;
+      floor.material.roughnessMap = textures.roughness || null;
+
+      // Normal map configuration
+      if (textures.normal) {
+        floor.material.normalScale = new THREE.Vector2(0.5, 0.5); // Adjust strength
+      }
+
+      // Remove solid color tint when texture is applied
+      if (textures.diffuse) {
+        floor.material.color.setHex(0xffffff);
+      }
+
+      // Important: Tell Three.js to update the material
+      floor.material.needsUpdate = true;
+
+      console.log('Grass floor textures applied');
+    });
     
     // Grid lines
     const gridHelper = new THREE.GridHelper(this.arenaSize, 20, 0x666666, 0x333333);
@@ -142,47 +253,110 @@ export class BattleArena {
     
     // Walls
     const wallHeight = 5;
-    const wallMaterial = new THREE.MeshStandardMaterial({ 
+    const wallThickness = 0.5;
+    const wallMaterial = new THREE.MeshStandardMaterial({
       color: 0x222222,
       transparent: true,
       opacity: 0.3
     });
-    
+
     // North wall
     const northWall = new THREE.Mesh(
-      new THREE.BoxGeometry(this.arenaSize, wallHeight, 0.5),
-      wallMaterial
+      new THREE.BoxGeometry(this.arenaSize, wallHeight, wallThickness),
+      wallMaterial.clone()
     );
     northWall.position.set(0, wallHeight / 2, -this.arenaSize / 2);
+    northWall.castShadow = true;
+    northWall.receiveShadow = true;
     this.arenaGroup.add(northWall);
     this.arenaWalls.push(northWall);
-    
+
     // South wall
     const southWall = new THREE.Mesh(
-      new THREE.BoxGeometry(this.arenaSize, wallHeight, 0.5),
-      wallMaterial
+      new THREE.BoxGeometry(this.arenaSize, wallHeight, wallThickness),
+      wallMaterial.clone()
     );
     southWall.position.set(0, wallHeight / 2, this.arenaSize / 2);
+    southWall.castShadow = true;
+    southWall.receiveShadow = true;
     this.arenaGroup.add(southWall);
     this.arenaWalls.push(southWall);
-    
+
     // East wall
     const eastWall = new THREE.Mesh(
-      new THREE.BoxGeometry(0.5, wallHeight, this.arenaSize),
-      wallMaterial
+      new THREE.BoxGeometry(wallThickness, wallHeight, this.arenaSize),
+      wallMaterial.clone()
     );
     eastWall.position.set(this.arenaSize / 2, wallHeight / 2, 0);
+    eastWall.castShadow = true;
+    eastWall.receiveShadow = true;
     this.arenaGroup.add(eastWall);
     this.arenaWalls.push(eastWall);
-    
+
     // West wall
     const westWall = new THREE.Mesh(
-      new THREE.BoxGeometry(0.5, wallHeight, this.arenaSize),
-      wallMaterial
+      new THREE.BoxGeometry(wallThickness, wallHeight, this.arenaSize),
+      wallMaterial.clone()
     );
     westWall.position.set(-this.arenaSize / 2, wallHeight / 2, 0);
+    westWall.castShadow = true;
+    westWall.receiveShadow = true;
     this.arenaGroup.add(westWall);
     this.arenaWalls.push(westWall);
+
+    // Load wall textures and apply to all walls
+    this.loadMaterialTextures('wall', (textures) => {
+      const walls = [northWall, southWall, eastWall, westWall];
+
+      walls.forEach(wall => {
+        // Configure texture wrapping and repeat
+        Object.values(textures).forEach(texture => {
+          if (texture) {
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+          }
+        });
+
+        // Different repeat for horizontal vs vertical walls
+        const isHorizontalWall = wall === northWall || wall === southWall;
+        if (isHorizontalWall) {
+          // North/South walls: 20 units wide x 5 units tall
+          Object.values(textures).forEach(texture => {
+            if (texture) texture.repeat.set(10, 2.5); // 2 units per repeat
+          });
+        } else {
+          // East/West walls: 20 units deep x 5 units tall
+          Object.values(textures).forEach(texture => {
+            if (texture) texture.repeat.set(10, 2.5);
+          });
+        }
+
+        // Update material
+        wall.material.map = textures.diffuse || null;
+        wall.material.normalMap = textures.normal || null;
+        wall.material.roughnessMap = textures.roughness || null;
+
+        // Normal map strength for gritty industrial look
+        if (textures.normal) {
+          wall.material.normalScale = new THREE.Vector2(1.0, 1.0); // Full strength
+        }
+
+        // REMOVE transparency - make walls fully opaque
+        wall.material.transparent = false;
+        wall.material.opacity = 1.0;
+
+        // Set to grey if diffuse texture loaded
+        if (textures.diffuse) {
+          wall.material.color.setHex(0xffffff);
+        } else {
+          wall.material.color.setHex(0x888888); // Fallback grey
+        }
+
+        wall.material.needsUpdate = true;
+      });
+
+      console.log('Wall textures applied to all 4 walls');
+    });
     
     this.addCover();
     
@@ -191,7 +365,7 @@ export class BattleArena {
 
   addCover() {
     const coverMaterial = new THREE.MeshStandardMaterial({ color: 0x555555 });
-    
+
     const positions = [
       [-4, 0.5, -4],
       [4, 0.5, 4],
@@ -199,11 +373,13 @@ export class BattleArena {
       [4, 0.5, -4],
       [0, 0.5, 0]
     ];
-    
+
+    const boxes = [];
+
     positions.forEach(pos => {
       const box = new THREE.Mesh(
         new THREE.BoxGeometry(1.5, 1, 1.5),
-        coverMaterial
+        coverMaterial.clone()
       );
       box.position.set(pos[0], pos[1], pos[2]);
       box.castShadow = true;
@@ -211,8 +387,46 @@ export class BattleArena {
       this.arenaGroup.add(box);
       this.arenaWalls.push(box); // For bullet collision
       this.coverBoxes.push(box);  // For player collision
+      boxes.push(box);
     });
-    
+
+    // Load metal textures for industrial look
+    this.loadMaterialTextures('metal', (textures) => {
+      boxes.forEach(box => {
+        // Configure texture wrapping
+        Object.values(textures).forEach(texture => {
+          if (texture) {
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(1, 1); // Single repeat for 1.5x1x1.5 boxes
+          }
+        });
+
+        // Update material
+        box.material.map = textures.diffuse || null;
+        box.material.normalMap = textures.normal || null;
+        box.material.roughnessMap = textures.roughness || null;
+
+        if (textures.normal) {
+          box.material.normalScale = new THREE.Vector2(0.8, 0.8);
+        }
+
+        // Set metallic properties for industrial look
+        box.material.metalness = 0.3;
+        box.material.roughness = 0.7;
+
+        if (textures.diffuse) {
+          box.material.color.setHex(0xffffff);
+        } else {
+          box.material.color.setHex(0x666666); // Darker grey fallback
+        }
+
+        box.material.needsUpdate = true;
+      });
+
+      console.log('Metal textures applied to cover boxes');
+    });
+
     console.log('Created', this.coverBoxes.length, 'cover boxes');
   }
 
