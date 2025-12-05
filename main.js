@@ -160,22 +160,24 @@ function handleGuestMoveRequest(message) {
   const targetPiece = game.getPiece(toRow, toCol);
   const isCapture = targetPiece && targetPiece.color !== 'black';
 
-  // Execute move
-  game.movePiece(fromRow, fromCol, toRow, toCol);
-  updateBoard();
+  // Clear selection state after validation
+  game.selectedPiece = null;
+  game.validMoves = [];
 
   if (isCapture) {
-    // Start battle
+    // Start battle without moving pieces yet
     battleFromRow = fromRow;
     battleFromCol = fromCol;
     battleToRow = toRow;
     battleToCol = toCol;
 
-    networkManager.send('startBattle', {
-      attackingPiece: piece,
-      defendingPiece: targetPiece,
-      fromRow, fromCol, toRow, toCol
-    }, 'game-state');
+    if (isConnected) {
+      networkManager.send('startBattle', {
+        attackingPiece: piece,
+        defendingPiece: targetPiece,
+        fromRow, fromCol, toRow, toCol
+      }, 'game-state');
+    }
 
     // Also start battle for host
     handleGameMessage({
@@ -184,13 +186,19 @@ function handleGuestMoveRequest(message) {
       defendingPiece: targetPiece,
       fromRow, fromCol, toRow, toCol
     });
-  } else {
-    // Normal move - broadcast state
-    networkManager.send('gameState', {
-      board: game.board,
-      currentTurn: game.currentTurn
-    }, 'game-state');
+
+    updateBoard();
+    return;
   }
+
+  // Normal move - execute immediately
+  game.movePiece(fromRow, fromCol, toRow, toCol);
+  updateBoard();
+
+  networkManager.send('gameState', {
+    board: game.board,
+    currentTurn: game.currentTurn
+  }, 'game-state');
 }
 
 function updatePlayerStatus(players) {
@@ -700,25 +708,29 @@ document.addEventListener('click', (e) => {
 
     const prevSelected = game.selectedPiece;
     const targetPiece = game.getPiece(row, col);
-    const isCapture = targetPiece && targetPiece.color !== playerColor &&
-                     game.validMoves.some(m => m.row === row && m.col === col);
+    const isValidDestination = prevSelected && game.validMoves.some(
+      m => m.row === row && m.col === col
+    );
+    const isCapture = prevSelected && targetPiece &&
+      targetPiece.color !== playerColor && isValidDestination;
 
-    // CRITICAL FIX: Get the attacking piece BEFORE making the move
-    // because selectPiece() will move the piece and clear the original square
-    const attackingPiece = prevSelected ? game.getPiece(prevSelected.row, prevSelected.col) : null;
+    // CRITICAL FIX: Use the piece data stored in prevSelected
+    // (getting from board might return null if state changed)
+    const attackingPiece = prevSelected ? prevSelected.piece : null;
 
-    const moved = game.selectPiece(row, col);
+    // For capture moves, defer board updates until the battle resolves
+    if (isCapture) {
+      battleFromRow = prevSelected.row;
+      battleFromCol = prevSelected.col;
+      battleToRow = row;
+      battleToCol = col;
 
-    if (moved && isConnected) {
+      // Clear selection highlights before hiding the board for battle
+      game.selectedPiece = null;
+      game.validMoves = [];
+
       if (isHost) {
-        // Host: execute move directly and broadcast state
-        if (isCapture) {
-          // Start battle
-          battleFromRow = prevSelected.row;
-          battleFromCol = prevSelected.col;
-          battleToRow = row;
-          battleToCol = col;
-
+        if (isConnected) {
           networkManager.send('startBattle', {
             attackingPiece: attackingPiece,
             defendingPiece: targetPiece,
@@ -727,23 +739,45 @@ document.addEventListener('click', (e) => {
             toRow: row,
             toCol: col
           }, 'game-state');
+        }
 
-          // Also start battle for host
-          handleGameMessage({
-            type: 'startBattle',
-            attackingPiece: attackingPiece,
-            defendingPiece: targetPiece,
+        // Start local battle immediately; opponent reacts via network message
+        handleGameMessage({
+          type: 'startBattle',
+          attackingPiece: attackingPiece,
+          defendingPiece: targetPiece,
+          fromRow: prevSelected.row,
+          fromCol: prevSelected.col,
+          toRow: row,
+          toCol: col
+        });
+      } else {
+        // Guest: send move request to host for validation/battle start
+        if (isConnected) {
+          networkManager.send('moveRequest', {
             fromRow: prevSelected.row,
             fromCol: prevSelected.col,
             toRow: row,
             toCol: col
-          });
-        } else {
-          networkManager.send('gameState', {
-            board: game.board,
-            currentTurn: game.currentTurn
           }, 'game-state');
+        } else {
+          showNotification('Not connected to host');
         }
+      }
+
+      updateBoard();
+      return;
+    }
+
+    const moved = game.selectPiece(row, col);
+
+    if (moved && isConnected) {
+      if (isHost) {
+        // Host: execute move directly and broadcast state
+        networkManager.send('gameState', {
+          board: game.board,
+          currentTurn: game.currentTurn
+        }, 'game-state');
       } else {
         // Guest: send move request to host
         networkManager.send('moveRequest', {
