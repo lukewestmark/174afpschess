@@ -142,6 +142,12 @@ export class BattleArena {
     this.opponentHitBox = new THREE.Box3();
     this.tempBulletSphere = new THREE.Sphere();
     
+    };
+
+    // Reusable hitbox + temp sphere for collision
+    this.opponentHitBox = new THREE.Box3();
+    this.tempBulletSphere = new THREE.Sphere();
+    
   }
 
   loadGunModel(type, callback) {
