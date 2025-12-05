@@ -18,9 +18,22 @@ export class BattleArena {
     this.isAttacker = false;
     this.playerGun = null;
     this.opponentGun = null;
-    
+
+    // Physics state for player movement
+    this.playerVelocity = new THREE.Vector3(0, 0, 0);
+    this.isGrounded = false;
+    this.jumpPressed = false;
+    this.groundLevel = 1.6; // Camera Y position when on ground
+
+    // Physics constants (tuned for game feel)
+    this.gravity = 15; // units/s² - faster than real gravity for responsive feel
+    this.jumpVelocity = 6.5; // units/s - results in ~1.41 unit jump height
+    this.maxSpeed = 6; // units/s - horizontal speed cap (prevents diagonal exploit)
+    this.moveAcceleration = 40; // units/s² - high for responsive input
+    this.friction = 25; // units/s² - deceleration when no input
+
     // Arena boundaries
-    this.arenaSize = 20;
+    this.arenaSize = 30; // Expanded by 50% (20 → 30)
     this.arenaWalls = [];
     this.coverBoxes = []; // Separate array for cover boxes
     
@@ -269,7 +282,12 @@ export class BattleArena {
     this.onBattleEnd = onBattleEnd;
     this.lastValidPosition = null; // Track last valid position
     this.lastShotTime = 0;
-    
+
+    // Reset physics state
+    this.playerVelocity.set(0, 0, 0);
+    this.isGrounded = true; // Start on ground
+    this.jumpPressed = false;
+
     this.createArena();
     
     // Load player's gun - position as centered barrel view
@@ -428,7 +446,7 @@ export class BattleArena {
     this.arenaGroup.add(gridHelper);
     
     // Walls
-    const wallHeight = 5;
+    const wallHeight = 7.5; // Increased by 50% (5 → 7.5)
     const wallThickness = 0.5;
     const wallMaterial = new THREE.MeshStandardMaterial({
       color: 0x222222,
@@ -543,18 +561,26 @@ export class BattleArena {
     const coverMaterial = new THREE.MeshStandardMaterial({ color: 0x555555 });
 
     const positions = [
-      [-4, 0.5, -4],
-      [4, 0.5, 4],
-      [-4, 0.5, 4],
-      [4, 0.5, -4],
-      [0, 0.5, 0]
+      [-6, 1.25, -6],  // Southwest (Y = 1.25 for 2.5 height box)
+      [6, 1.25, 6],    // Northeast
+      [-6, 1.25, 6],   // Northwest
+      [6, 1.25, -6],   // Southeast
+      [0, 0.5, 0]      // CENTER (Y = 0.5 for 1.0 height box, unchanged)
     ];
 
     const boxes = [];
 
     positions.forEach(pos => {
+      // Determine if this is the center box
+      const isCenter = (pos[0] === 0 && pos[2] === 0);
+
+      // Center box stays small, corner boxes become tall and wide
+      const width = isCenter ? 1.5 : 3.0;   // Double wide for corners
+      const height = isCenter ? 1.0 : 2.5;  // Taller than player (1.6) for corners
+      const depth = isCenter ? 1.5 : 3.0;   // Double depth for corners
+
       const box = new THREE.Mesh(
-        new THREE.BoxGeometry(1.5, 1, 1.5),
+        new THREE.BoxGeometry(width, height, depth),
         coverMaterial.clone()
       );
       box.position.set(pos[0], pos[1], pos[2]);
@@ -787,6 +813,108 @@ export class BattleArena {
     };
   }
 
+  updateBattlePhysics(keys, deltaTime, camera) {
+    // 1. Calculate input direction (world space, horizontal only)
+    const forward = new THREE.Vector3();
+    const right = new THREE.Vector3();
+
+    camera.getWorldDirection(forward);
+    forward.y = 0; // Project to horizontal plane
+    forward.normalize();
+
+    right.crossVectors(forward, new THREE.Vector3(0, 1, 0));
+
+    const inputDir = new THREE.Vector3(0, 0, 0);
+    if (keys['KeyW']) inputDir.add(forward);
+    if (keys['KeyS']) inputDir.sub(forward);
+    if (keys['KeyA']) inputDir.sub(right);
+    if (keys['KeyD']) inputDir.add(right);
+
+    // 2. Apply horizontal acceleration or friction
+    if (inputDir.lengthSq() > 0) {
+      // Player pressing movement keys - apply acceleration
+      inputDir.normalize(); // Ensure diagonal input doesn't accelerate faster
+      this.playerVelocity.x += inputDir.x * this.moveAcceleration * deltaTime;
+      this.playerVelocity.z += inputDir.z * this.moveAcceleration * deltaTime;
+    } else {
+      // No input - apply friction to slow down
+      const horizontalSpeed = Math.sqrt(
+        this.playerVelocity.x * this.playerVelocity.x +
+        this.playerVelocity.z * this.playerVelocity.z
+      );
+
+      if (horizontalSpeed > 0) {
+        const frictionMag = Math.min(this.friction * deltaTime, horizontalSpeed);
+        const frictionDir = new THREE.Vector3(
+          this.playerVelocity.x / horizontalSpeed,
+          0,
+          this.playerVelocity.z / horizontalSpeed
+        );
+        this.playerVelocity.x -= frictionDir.x * frictionMag;
+        this.playerVelocity.z -= frictionDir.z * frictionMag;
+      }
+    }
+
+    // 3. Cap horizontal speed (prevents diagonal movement exploit)
+    const horizontalSpeed = Math.sqrt(
+      this.playerVelocity.x * this.playerVelocity.x +
+      this.playerVelocity.z * this.playerVelocity.z
+    );
+
+    if (horizontalSpeed > this.maxSpeed) {
+      const scale = this.maxSpeed / horizontalSpeed;
+      this.playerVelocity.x *= scale;
+      this.playerVelocity.z *= scale;
+    }
+
+    // 4. Handle jumping
+    if (keys['Space'] && !this.jumpPressed && this.isGrounded) {
+      this.playerVelocity.y = this.jumpVelocity;
+      this.isGrounded = false;
+      this.jumpPressed = true;
+    }
+
+    // Reset jump flag when space released (enables next jump)
+    if (!keys['Space']) {
+      this.jumpPressed = false;
+    }
+
+    // 5. Apply gravity (always, even when grounded)
+    this.playerVelocity.y -= this.gravity * deltaTime;
+
+    // 6. Calculate new position from velocity
+    const newPosition = camera.position.clone();
+    newPosition.x += this.playerVelocity.x * deltaTime;
+    newPosition.y += this.playerVelocity.y * deltaTime;
+    newPosition.z += this.playerVelocity.z * deltaTime;
+
+    // 7. Ground collision detection
+    if (newPosition.y <= this.groundLevel) {
+      newPosition.y = this.groundLevel;
+      this.playerVelocity.y = 0; // Stop falling
+      this.isGrounded = true;
+    } else {
+      this.isGrounded = false;
+    }
+
+    // 8. Ceiling collision detection
+    if (newPosition.y >= 6) { // Increased to match taller walls
+      newPosition.y = 6;
+      if (this.playerVelocity.y > 0) {
+        this.playerVelocity.y = 0; // Stop upward movement
+      }
+    }
+
+    // 9. Apply arena constraints (walls, boxes, boundaries)
+    this.constrainPlayerMovement(newPosition);
+
+    // 10. Update camera position
+    camera.position.copy(newPosition);
+
+    // Note: Horizontal velocity is NOT zeroed on collision
+    // This allows "wall sliding" for smooth movement
+  }
+
   endBattle(playerWon) {
     this.battleActive = false;
     
@@ -818,7 +946,7 @@ export class BattleArena {
     // Clamp to arena boundaries
     position.x = Math.max(-halfSize, Math.min(halfSize, position.x));
     position.z = Math.max(-halfSize, Math.min(halfSize, position.z));
-    position.y = Math.max(0.5, Math.min(4, position.y));
+    position.y = Math.max(0.5, Math.min(6, position.y)); // Increased to 6 for taller walls
     
     // Check collision with cover boxes (only X and Z, ignore Y)
     for (const box of this.coverBoxes) {
@@ -865,6 +993,11 @@ export class BattleArena {
       this.scene.remove(this.arenaGroup);
       this.arenaGroup.clear();
     }
+
+    // Reset physics state
+    this.playerVelocity.set(0, 0, 0);
+    this.isGrounded = false;
+    this.jumpPressed = false;
   }
 
   getPlayerState() {

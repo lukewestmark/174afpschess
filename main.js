@@ -669,34 +669,8 @@ document.addEventListener('click', (e) => {
 
 function updateMovement() {
   if (battleArena.isActive()) {
-    const forward = new THREE.Vector3();
-    const right = new THREE.Vector3();
-    
-    camera.getWorldDirection(forward);
-    forward.y = 0;
-    forward.normalize();
-    
-    right.crossVectors(forward, new THREE.Vector3(0, 1, 0));
-    
-    const moveSpeedBattle = 0.15;
-    
-    // Check collision after EACH movement
-    if (keys['KeyW']) {
-      camera.position.addScaledVector(forward, moveSpeedBattle);
-      battleArena.constrainPlayerMovement(camera.position);
-    }
-    if (keys['KeyS']) {
-      camera.position.addScaledVector(forward, -moveSpeedBattle);
-      battleArena.constrainPlayerMovement(camera.position);
-    }
-    if (keys['KeyA']) {
-      camera.position.addScaledVector(right, -moveSpeedBattle);
-      battleArena.constrainPlayerMovement(camera.position);
-    }
-    if (keys['KeyD']) {
-      camera.position.addScaledVector(right, moveSpeedBattle);
-      battleArena.constrainPlayerMovement(camera.position);
-    }
+    // Use physics-based movement during battles
+    battleArena.updateBattlePhysics(keys, deltaTime, camera);
   } else {
     const forward = new THREE.Vector3();
     const right = new THREE.Vector3();
@@ -773,14 +747,15 @@ function handleBattleEnd(playerWon, isAttacker) {
 // Animation loop
 let lastTime = Date.now();
 let lastNetworkUpdate = Date.now();
+let deltaTime = 0; // Make deltaTime accessible to updateMovement
 
 function animate() {
   requestAnimationFrame(animate);
-  
+
   const currentTime = Date.now();
-  const deltaTime = (currentTime - lastTime) / 1000;
+  deltaTime = (currentTime - lastTime) / 1000; // Update global deltaTime
   lastTime = currentTime;
-  
+
   updateMovement();
   
   if (battleArena.isActive() && currentTime - lastNetworkUpdate > 50 && isConnected) {
