@@ -824,6 +824,38 @@ function handleBattleEnd(playerWon, isAttacker) {
       winner: game.winner
     }, 'game-state');
   }
+
+  // CRITICAL FIX: Clean up local battle arena
+  // (The opponent will clean up when they receive the battleEnded message)
+  if (battleArena.isActive()) {
+    battleArena.cleanup();
+    battleArena.battleActive = false;
+  }
+
+  // Show chess board again
+  boardGroup.visible = true;
+
+  // Reset camera to chess view
+  camera.position.set(0, 2, 5);
+  camera.rotation.set(0, 0, 0);
+
+  updateBoard();
+
+  // Show result notification
+  const resultMsg = attackerWon ? 'Attacker won the battle!' : 'Defender won the battle!';
+  showNotification(resultMsg);
+
+  if (game.gameOver) {
+    const winnerText = game.winner === playerColor ? 'YOU WIN!' : 'YOU LOSE!';
+    setTimeout(() => {
+      showNotification(`GAME OVER! ${game.winner.toUpperCase()} WINS! ${winnerText}`);
+      setTimeout(() => {
+        if (confirm(`${game.winner.toUpperCase()} wins! Play again?`)) {
+          location.reload();
+        }
+      }, 2000);
+    }, 1500);
+  }
 }
 
 // Animation loop
