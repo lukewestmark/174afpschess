@@ -8,6 +8,41 @@
 		</style>
 	</head>
 	<body>
+		<script>
+			// ICE configuration for the browser. On LAN we default to host candidates (no TURN).
+			// You can override by setting window.TURN_CONFIG before main.js loads, or by
+			// writing localStorage.turn_config (same shape).
+			(() => {
+				const defaultIce = {
+					iceServers: [],
+					iceTransportPolicy: 'all'
+				};
+
+				// Respect existing config
+				if (!window.TURN_CONFIG) {
+					const stored = localStorage.getItem('turn_config');
+					if (stored) {
+						try {
+							window.TURN_CONFIG = JSON.parse(stored);
+						} catch (_) {
+							console.warn('Failed to parse turn_config from localStorage, using defaults.');
+							window.TURN_CONFIG = defaultIce;
+						}
+					} else {
+						window.TURN_CONFIG = defaultIce;
+					}
+				}
+
+				// Persist so host/guest stay in sync on reload
+				try {
+					localStorage.setItem('turn_config', JSON.stringify(window.TURN_CONFIG));
+				} catch (err) {
+					console.warn('Unable to persist TURN config to localStorage:', err);
+				}
+
+				console.log('TURN config (edit in index.html or localStorage.turn_config):', window.TURN_CONFIG);
+			})();
+		</script>
 		<script type="module" src="/main.js"></script>
 	</body>
 </html>

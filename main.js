@@ -2,92 +2,56 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ChessGame } from './chess.js';
 import { BattleArena } from './battle.js';
+import { NetworkManager } from './network-manager.js';
 
-// WebSocket connection
-let ws;
+// Network connection
+let networkManager = null;
 let playerColor = null;
 let isConnected = false;
-let currentRoomCode = null;
+let isHost = false;
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8080';
-
-function connectToServer() {
-  ws = new WebSocket(WS_URL);
-  
-  ws.onopen = () => {
-    console.log('Connected to server');
-    isConnected = true;
-  };
-  
-  ws.onmessage = (event) => {
-    const message = JSON.parse(event.data);
-    handleServerMessage(message);
-  };
-  
-  ws.onclose = () => {
-    console.log('Disconnected from server');
-    isConnected = false;
-    setTimeout(connectToServer, 3000);
-  };
-  
-  ws.onerror = (error) => {
-    console.error('WebSocket error:', error);
-  };
-}
-
-function handleServerMessage(message) {
+function handleGameMessage(message) {
   switch (message.type) {
-    case 'roomCreated':
-      currentRoomCode = message.roomCode;
-      roomCodeDisplay.textContent = `Room Code: ${message.roomCode}`;
-      roomSetupDiv.style.display = 'none';
-      showNotification(`Room created! Share code: ${message.roomCode}`);
+    case 'connected':
+      showNotification(isHost ? 'Guest connected!' : 'Connected to host!');
+      updatePlayerStatus({ white: true, black: true });
       break;
-      
-    case 'roomJoined':
-      currentRoomCode = message.roomCode;
-      roomCodeDisplay.textContent = `Room Code: ${message.roomCode}`;
-      roomSetupDiv.style.display = 'none';
-      if (message.gameState.board) {
-        game.board = message.gameState.board;
-        game.currentTurn = message.gameState.currentTurn;
-        updateBoard();
+
+    case 'moveRequest':
+      // Host only - validate guest's move
+      if (isHost) {
+        handleGuestMoveRequest(message);
       }
-      updatePlayerStatus(message.gameState.players);
-      showNotification(`Joined room: ${message.roomCode}`);
-      ws.send(JSON.stringify({
-        type: 'init',
-        board: game.board,
-        currentTurn: game.currentTurn
-      }));
       break;
-      
+
     case 'gameState':
-      if (message.state.board) {
-        game.board = message.state.board;
-        game.currentTurn = message.state.currentTurn;
+      // Guest only - update from host
+      if (!isHost) {
+        game.board = message.board;
+        game.currentTurn = message.currentTurn;
         updateBoard();
       }
-      updatePlayerStatus(message.state.players);
       break;
-    
-    case 'startBattle': {
+
+    case 'startBattle':
+      // Determine if this player is the attacker or defender
       const isAttacker = playerColor === message.attackingPiece.color;
       battleFromRow = message.fromRow;
       battleFromCol = message.fromCol;
       battleToRow = message.toRow;
       battleToCol = message.toCol;
-      
+
+      // Hide chess board
       boardGroup.visible = false;
-      
+
       showNotification(isAttacker ? 'You are attacking! Win the battle!' : 'Defend yourself!');
-      
+
       // CRITICAL FIX: For the defender, swap the pieces so they see their own piece correctly
       // Attacker sees: their piece (attacking) vs opponent piece (defending)
       // Defender sees: their piece (defending) vs opponent piece (attacking)
       const myPiece = isAttacker ? message.attackingPiece : message.defendingPiece;
       const enemyPiece = isAttacker ? message.defendingPiece : message.attackingPiece;
-      
+
       battleArena.startBattle(
         myPiece,
         enemyPiece,
@@ -97,46 +61,50 @@ function handleServerMessage(message) {
         }
       );
       break;
-    }
-    
-    case 'opponentUpdate':
+
+    case 'battleUpdate':
+      // Update opponent's position and handle their shots
       if (battleArena.isActive()) {
         battleArena.updateOpponentPosition(message.position, message.rotation);
-        
+
         if (message.shot) {
           battleArena.handleOpponentShot(message.shot);
         }
-        
+
+        // Update opponent health from their perspective
         if (message.health !== undefined) {
           battleArena.updateOpponentHealth(message.health);
         }
       }
       break;
-    
+
     case 'battleEnded':
       if (battleArena.isActive()) {
         battleArena.cleanup();
         battleArena.battleActive = false;
       }
-      
+
+      // Update board after battle
       game.board = message.board;
       game.currentTurn = message.currentTurn;
-      
+
       if (message.gameOver) {
         game.gameOver = message.gameOver;
         game.winner = message.winner;
       }
-      
+
+      // Show chess board again
       boardGroup.visible = true;
-      
+
+      // Reset camera to chess view
       camera.position.set(0, 2, 5);
       camera.rotation.set(0, 0, 0);
-      
+
       updateBoard();
-      
+
       const resultMsg = message.attackerWon ? 'Attacker won the battle!' : 'Defender won the battle!';
       showNotification(resultMsg);
-      
+
       if (game.gameOver) {
         const winnerText = game.winner === playerColor ? 'YOU WIN!' : 'YOU LOSE!';
         setTimeout(() => {
@@ -149,29 +117,89 @@ function handleServerMessage(message) {
         }, 1500);
       }
       break;
-      
-    case 'playerJoined':
-      updatePlayerStatus(message.players);
-      showNotification(`${message.color} player joined!`);
+
+    case 'pieceSelected':
+      // Visual feedback for opponent's selection
+      showNotification(`Opponent selected piece at (${message.row}, ${message.col})`);
       break;
-      
-    case 'playerLeft':
-      showNotification(`${message.color} player left`);
-      break;
-      
+
     case 'error':
       showNotification(message.message);
       break;
   }
 }
 
+function handleGuestMoveRequest(message) {
+  const { fromRow, fromCol, toRow, toCol } = message;
+
+  // Validate it's guest's turn
+  if (game.currentTurn !== 'black') {
+    networkManager.send('error', { message: 'Not your turn' }, 'game-state');
+    return;
+  }
+
+  // Validate move is legal
+  const piece = game.getPiece(fromRow, fromCol);
+  if (!piece || piece.color !== 'black') {
+    networkManager.send('error', { message: 'Invalid piece' }, 'game-state');
+    return;
+  }
+
+  game.selectedPiece = { row: fromRow, col: fromCol, piece };
+  game.validMoves = game.getValidMoves(fromRow, fromCol);
+  const isValid = game.validMoves.some(m => m.row === toRow && m.col === toCol);
+
+  if (!isValid) {
+    networkManager.send('error', { message: 'Invalid move' }, 'game-state');
+    game.selectedPiece = null;
+    game.validMoves = [];
+    return;
+  }
+
+  // Check for capture
+  const targetPiece = game.getPiece(toRow, toCol);
+  const isCapture = targetPiece && targetPiece.color !== 'black';
+
+  // Execute move
+  game.movePiece(fromRow, fromCol, toRow, toCol);
+  updateBoard();
+
+  if (isCapture) {
+    // Start battle
+    battleFromRow = fromRow;
+    battleFromCol = fromCol;
+    battleToRow = toRow;
+    battleToCol = toCol;
+
+    networkManager.send('startBattle', {
+      attackingPiece: piece,
+      defendingPiece: targetPiece,
+      fromRow, fromCol, toRow, toCol
+    }, 'game-state');
+
+    // Also start battle for host
+    handleGameMessage({
+      type: 'startBattle',
+      attackingPiece: piece,
+      defendingPiece: targetPiece,
+      fromRow, fromCol, toRow, toCol
+    });
+  } else {
+    // Normal move - broadcast state
+    networkManager.send('gameState', {
+      board: game.board,
+      currentTurn: game.currentTurn
+    }, 'game-state');
+  }
+}
+
 function updatePlayerStatus(players) {
   const hasWhite = players && players.white;
   const hasBlack = players && players.black;
-  
+
   playerStatusDiv.innerHTML = `
-    <div>White: ${hasWhite ? '✓ Connected' : '⨯ Waiting...'}</div>
-    <div>Black: ${hasBlack ? '✓ Connected' : '⨯ Waiting...'}</div>
+    <div>White (Host): ${hasWhite ? '✓ Connected' : '⨯ Waiting...'}</div>
+    <div>Black (Guest): ${hasBlack ? '✓ Connected' : '⨯ Waiting...'}</div>
   `;
 }
 
@@ -434,23 +462,24 @@ ui.style.pointerEvents = 'none';
 ui.style.zIndex = '1000';
 document.body.appendChild(ui);
 
-// Room code display
-const roomCodeDisplay = document.createElement('div');
-roomCodeDisplay.style.position = 'fixed';
-roomCodeDisplay.style.top = '10px';
-roomCodeDisplay.style.left = '50%';
-roomCodeDisplay.style.transform = 'translateX(-50%)';
-roomCodeDisplay.style.color = 'white';
-roomCodeDisplay.style.fontFamily = 'Arial, sans-serif';
-roomCodeDisplay.style.fontSize = '24px';
-roomCodeDisplay.style.fontWeight = 'bold';
-roomCodeDisplay.style.textShadow = '2px 2px 4px black';
-roomCodeDisplay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-roomCodeDisplay.style.padding = '10px 20px';
-roomCodeDisplay.style.borderRadius = '5px';
-roomCodeDisplay.style.pointerEvents = 'none';
-roomCodeDisplay.style.zIndex = '1000';
-document.body.appendChild(roomCodeDisplay);
+// Connection status display
+const connectionStatusDisplay = document.createElement('div');
+connectionStatusDisplay.style.position = 'fixed';
+connectionStatusDisplay.style.top = '10px';
+connectionStatusDisplay.style.left = '50%';
+connectionStatusDisplay.style.transform = 'translateX(-50%)';
+connectionStatusDisplay.style.color = 'white';
+connectionStatusDisplay.style.fontFamily = 'Arial, sans-serif';
+connectionStatusDisplay.style.fontSize = '18px';
+connectionStatusDisplay.style.fontWeight = 'bold';
+connectionStatusDisplay.style.textShadow = '2px 2px 4px black';
+connectionStatusDisplay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+connectionStatusDisplay.style.padding = '10px 20px';
+connectionStatusDisplay.style.borderRadius = '5px';
+connectionStatusDisplay.style.pointerEvents = 'none';
+connectionStatusDisplay.style.zIndex = '1000';
+connectionStatusDisplay.style.display = 'none';
+document.body.appendChild(connectionStatusDisplay);
 
 // Player status UI
 const playerStatusDiv = document.createElement('div');
@@ -468,49 +497,34 @@ playerStatusDiv.style.padding = '10px';
 playerStatusDiv.style.borderRadius = '5px';
 document.body.appendChild(playerStatusDiv);
 
-// Room setup UI
-const roomSetupDiv = document.createElement('div');
-roomSetupDiv.style.position = 'fixed';
-roomSetupDiv.style.top = '50%';
-roomSetupDiv.style.left = '50%';
-roomSetupDiv.style.transform = 'translate(-50%, -50%)';
-roomSetupDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
-roomSetupDiv.style.padding = '30px';
-roomSetupDiv.style.borderRadius = '10px';
-roomSetupDiv.style.color = 'white';
-roomSetupDiv.style.fontFamily = 'Arial, sans-serif';
-roomSetupDiv.style.textAlign = 'center';
-roomSetupDiv.style.zIndex = '2000';
-roomSetupDiv.innerHTML = `
-  <h2 style="margin-bottom: 20px;">FPS Chess - Multiplayer</h2>
-  <button id="createRoomBtn" style="padding: 15px 30px; margin: 10px; font-size: 18px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 5px;">Create New Room</button>
+// Connection setup UI
+const connectionSetupDiv = document.createElement('div');
+connectionSetupDiv.style.position = 'fixed';
+connectionSetupDiv.style.top = '50%';
+connectionSetupDiv.style.left = '50%';
+connectionSetupDiv.style.transform = 'translate(-50%, -50%)';
+connectionSetupDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+connectionSetupDiv.style.padding = '30px';
+connectionSetupDiv.style.borderRadius = '10px';
+connectionSetupDiv.style.color = 'white';
+connectionSetupDiv.style.fontFamily = 'Arial, sans-serif';
+connectionSetupDiv.style.textAlign = 'center';
+connectionSetupDiv.style.zIndex = '2000';
+connectionSetupDiv.innerHTML = `
+  <h2 style="margin-bottom: 20px;">🎮 FPS Chess - LAN Multiplayer</h2>
+  <button id="hostGameBtn" style="padding: 15px 30px; margin: 10px; font-size: 18px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 5px; font-weight: bold;">Host Game (White)</button>
+  <div id="localIPsDisplay" style="margin: 15px 0; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 5px; display: none;">
+    <div style="font-weight: bold; margin-bottom: 10px;">🌐 Your Local IPs:</div>
+    <div id="ipList" style="font-family: monospace;"></div>
+    <div style="margin-top: 10px; font-size: 14px; color: #aaa;">Share one of these IPs with the guest</div>
+  </div>
   <div style="margin: 20px 0;">- OR -</div>
-  <input id="roomCodeInput" type="text" placeholder="Enter Room Code" style="padding: 10px; font-size: 16px; margin: 10px; border-radius: 5px; border: none; text-align: center;">
+  <input id="hostIPInput" type="text" placeholder="Enter Host IP (e.g., 192.168.1.100)" style="padding: 10px; font-size: 16px; margin: 10px; border-radius: 5px; border: none; text-align: center; width: 300px;">
   <br>
-  <button id="joinRoomBtn" style="padding: 15px 30px; margin: 10px; font-size: 18px; cursor: pointer; background: #2196F3; color: white; border: none; border-radius: 5px;">Join Room</button>
+  <button id="joinGameBtn" style="padding: 15px 30px; margin: 10px; font-size: 18px; cursor: pointer; background: #2196F3; color: white; border: none; border-radius: 5px; font-weight: bold;">Join Game (Black)</button>
+  <div id="connectionProgress" style="margin-top: 20px; display: none; color: #4CAF50;"></div>
 `;
-document.body.appendChild(roomSetupDiv);
-
-// Color selection UI
-const colorSelectionDiv = document.createElement('div');
-colorSelectionDiv.style.position = 'fixed';
-colorSelectionDiv.style.top = '50%';
-colorSelectionDiv.style.left = '50%';
-colorSelectionDiv.style.transform = 'translate(-50%, -50%)';
-colorSelectionDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
-colorSelectionDiv.style.padding = '30px';
-colorSelectionDiv.style.borderRadius = '10px';
-colorSelectionDiv.style.color = 'white';
-colorSelectionDiv.style.fontFamily = 'Arial, sans-serif';
-colorSelectionDiv.style.textAlign = 'center';
-colorSelectionDiv.style.zIndex = '2000';
-colorSelectionDiv.style.display = 'none';
-colorSelectionDiv.innerHTML = `
-  <h2 style="margin-bottom: 20px;">Choose Your Color</h2>
-  <button id="whiteBtn" style="padding: 15px 30px; margin: 10px; font-size: 18px; cursor: pointer; background: white; border: none; border-radius: 5px;">Play as White</button>
-  <button id="blackBtn" style="padding: 15px 30px; margin: 10px; font-size: 18px; cursor: pointer; background: #333; color: white; border: none; border-radius: 5px;">Play as Black</button>
-`;
-document.body.appendChild(colorSelectionDiv);
+document.body.appendChild(connectionSetupDiv);
 
 // Notification system
 const notificationDiv = document.createElement('div');
@@ -536,97 +550,144 @@ function showNotification(message) {
   }, 3000);
 }
 
-// Room setup handlers
-document.getElementById('createRoomBtn').addEventListener('click', () => {
-  if (isConnected) {
-    ws.send(JSON.stringify({ type: 'createRoom' }));
-    colorSelectionDiv.style.display = 'block';
-  } else {
-    showNotification('Not connected to server. Please wait...');
+// Connection setup handlers
+document.getElementById('hostGameBtn').addEventListener('click', async () => {
+  try {
+    document.getElementById('connectionProgress').textContent = '⏳ Starting host...';
+    document.getElementById('connectionProgress').style.display = 'block';
+
+    isHost = true;
+    playerColor = 'white';
+    networkManager = new NetworkManager(true);
+
+    const ips = await networkManager.startHost();
+
+    // Display local IPs
+    const ipListDiv = document.getElementById('ipList');
+    ipListDiv.innerHTML = ips.map(ip => {
+      const star = ip.isPrimary ? ' ⭐' : '';
+      return `<div style="margin: 5px 0; font-size: 16px;">${ip.address}${star}</div>`;
+    }).join('');
+
+    document.getElementById('localIPsDisplay').style.display = 'block';
+    document.getElementById('connectionProgress').textContent = '⏳ Waiting for guest to connect...';
+
+    // Set up message handler
+    networkManager.onMessage((message) => {
+      handleGameMessage(message);
+    });
+
+    // Set up connection state handler
+    networkManager.onConnectionStateChange((state) => {
+      if (state === 'connected') {
+        isConnected = true;
+        connectionSetupDiv.style.display = 'none';
+        connectionStatusDisplay.textContent = '🟢 Connected - P2P Mode';
+        connectionStatusDisplay.style.display = 'block';
+        updatePlayerStatus({ white: true, black: true });
+        showNotification('Guest connected! Game started!');
+      }
+    });
+
+    updatePlayerStatus({ white: true, black: false });
+
+  } catch (error) {
+    console.error('Error starting host:', error);
+    showNotification('Failed to start host: ' + error.message);
+    document.getElementById('connectionProgress').style.display = 'none';
   }
 });
 
-document.getElementById('joinRoomBtn').addEventListener('click', () => {
-  const roomCode = document.getElementById('roomCodeInput').value.trim().toUpperCase();
-  if (!roomCode) {
-    showNotification('Please enter a room code');
+document.getElementById('joinGameBtn').addEventListener('click', async () => {
+  const hostIP = document.getElementById('hostIPInput').value.trim();
+
+  if (!hostIP) {
+    showNotification('Please enter host IP address');
     return;
   }
-  
-  if (isConnected) {
-    ws.send(JSON.stringify({ 
-      type: 'joinRoom',
-      roomCode: roomCode
-    }));
-    colorSelectionDiv.style.display = 'block';
-  } else {
-    showNotification('Not connected to server. Please wait...');
+
+  try {
+    document.getElementById('connectionProgress').textContent = '⏳ Connecting to host...';
+    document.getElementById('connectionProgress').style.display = 'block';
+
+    isHost = false;
+    playerColor = 'black';
+    networkManager = new NetworkManager(false);
+
+    await networkManager.connectToHost(hostIP);
+
+    // Set up message handler
+    networkManager.onMessage((message) => {
+      handleGameMessage(message);
+    });
+
+    // Set up connection state handler
+    networkManager.onConnectionStateChange((state) => {
+      if (state === 'connected') {
+        isConnected = true;
+        connectionSetupDiv.style.display = 'none';
+        connectionStatusDisplay.textContent = '🟢 Connected - P2P Mode';
+        connectionStatusDisplay.style.display = 'block';
+        updatePlayerStatus({ white: true, black: true });
+        showNotification('Connected to host! Game started!');
+
+        // Notify host that guest connected
+        networkManager.send('connected', {}, 'game-state');
+      }
+    });
+
+    updatePlayerStatus({ white: true, black: false });
+
+  } catch (error) {
+    console.error('Error connecting to host:', error);
+    showNotification('Connection failed: ' + error.message);
+    document.getElementById('connectionProgress').style.display = 'none';
   }
 });
-
-document.getElementById('whiteBtn').addEventListener('click', () => {
-  selectColor('white');
-});
-
-document.getElementById('blackBtn').addEventListener('click', () => {
-  selectColor('black');
-});
-
-function selectColor(color) {
-  if (isConnected && currentRoomCode) {
-    ws.send(JSON.stringify({
-      type: 'join',
-      color: color
-    }));
-    playerColor = color;
-    colorSelectionDiv.style.display = 'none';
-    showNotification(`You are playing as ${color}`);
-  } else {
-    showNotification('Not in a room. Please create or join a room first.');
-  }
-}
 
 document.addEventListener('click', (e) => {
   if (!isPointerLocked) return;
   
   if (battleArena.isActive()) {
     const shotData = battleArena.shoot();
-    
+
+    // Send shot to opponent
     if (shotData && isConnected) {
       const playerState = battleArena.getPlayerState();
-      ws.send(JSON.stringify({
-        type: 'battleUpdate',
+      networkManager.send('battleUpdate', {
         position: playerState.position,
         rotation: playerState.rotation,
         shot: shotData,
         health: playerState.health
-      }));
+      }, 'battle-updates'); // Use unreliable channel
     }
     return;
   }
-  
+
   if (!playerColor) return;
-  
+
   if (game.gameOver) {
     showNotification('Game is over!');
     return;
   }
-  
+
+  // Only allow moves on your turn
   if (playerColor !== game.currentTurn) {
     showNotification("It's not your turn!");
     return;
   }
-  
+
   raycaster.setFromCamera({ x: 0, y: 0 }, camera);
-  
+
+  // Check for square clicks
   const squareIntersects = raycaster.intersectObjects(
     squares.flat().concat(Object.values(pieceMeshes))
   );
-  
+
   if (squareIntersects.length > 0) {
     const intersect = squareIntersects[0];
     let row, col;
-    
+
     if (intersect.object.userData.row !== undefined) {
       row = intersect.object.userData.row;
       col = intersect.object.userData.col;
@@ -636,33 +697,64 @@ document.addEventListener('click', (e) => {
       col = Math.floor(x / squareSize);
       row = Math.floor(z / squareSize);
     }
-    
+
     const prevSelected = game.selectedPiece;
     const targetPiece = game.getPiece(row, col);
-    const isCapture = targetPiece && targetPiece.color !== playerColor && 
+    const isCapture = targetPiece && targetPiece.color !== playerColor &&
                      game.validMoves.some(m => m.row === row && m.col === col);
-    
+
     // CRITICAL FIX: Get the attacking piece BEFORE making the move
     // because selectPiece() will move the piece and clear the original square
     const attackingPiece = prevSelected ? game.getPiece(prevSelected.row, prevSelected.col) : null;
-    
+
     const moved = game.selectPiece(row, col);
-    
+
     if (moved && isConnected) {
-      ws.send(JSON.stringify({
-        type: 'move',
-        fromRow: prevSelected.row,
-        fromCol: prevSelected.col,
-        toRow: row,
-        toCol: col,
-        board: game.board,
-        currentTurn: game.currentTurn,
-        isCapture: isCapture,
-        attackingPiece: attackingPiece,
-        defendingPiece: targetPiece
-      }));
+      if (isHost) {
+        // Host: execute move directly and broadcast state
+        if (isCapture) {
+          // Start battle
+          battleFromRow = prevSelected.row;
+          battleFromCol = prevSelected.col;
+          battleToRow = row;
+          battleToCol = col;
+
+          networkManager.send('startBattle', {
+            attackingPiece: attackingPiece,
+            defendingPiece: targetPiece,
+            fromRow: prevSelected.row,
+            fromCol: prevSelected.col,
+            toRow: row,
+            toCol: col
+          }, 'game-state');
+
+          // Also start battle for host
+          handleGameMessage({
+            type: 'startBattle',
+            attackingPiece: attackingPiece,
+            defendingPiece: targetPiece,
+            fromRow: prevSelected.row,
+            fromCol: prevSelected.col,
+            toRow: row,
+            toCol: col
+          });
+        } else {
+          networkManager.send('gameState', {
+            board: game.board,
+            currentTurn: game.currentTurn
+          }, 'game-state');
+        }
+      } else {
+        // Guest: send move request to host
+        networkManager.send('moveRequest', {
+          fromRow: prevSelected.row,
+          fromCol: prevSelected.col,
+          toRow: row,
+          toCol: col
+        }, 'game-state');
+      }
     }
-    
+
     updateBoard();
   }
 });
@@ -694,32 +786,33 @@ function updateMovement() {
 
 function handleBattleEnd(playerWon, isAttacker) {
   const attackerWon = (isAttacker && playerWon) || (!isAttacker && !playerWon);
-  
+
   const defendingPiece = game.board[battleToRow][battleToCol];
   const attackingPiece = game.board[battleFromRow][battleFromCol];
-  
+
+  // Update board based on battle result
   if (attackerWon) {
     game.board[battleToRow][battleToCol] = game.board[battleFromRow][battleFromCol];
     game.board[battleFromRow][battleFromCol] = null;
-    
+
     if (defendingPiece && defendingPiece.type === 'king') {
       game.gameOver = true;
       game.winner = attackingPiece.color;
     }
   } else {
     game.board[battleFromRow][battleFromCol] = null;
-    
+
     if (attackingPiece && attackingPiece.type === 'king') {
       game.gameOver = true;
       game.winner = defendingPiece.color;
     }
   }
-  
+
   game.currentTurn = game.currentTurn === 'white' ? 'black' : 'white';
-  
+
+  // Send battle result to opponent
   if (isConnected) {
-    ws.send(JSON.stringify({
-      type: 'battleResult',
+    networkManager.send('battleEnded', {
       attackerWon: attackerWon,
       fromRow: battleFromRow,
       fromCol: battleFromCol,
@@ -729,18 +822,7 @@ function handleBattleEnd(playerWon, isAttacker) {
       currentTurn: game.currentTurn,
       gameOver: game.gameOver,
       winner: game.winner
-    }));
-  }
-  
-  if (game.gameOver) {
-    const winnerText = game.winner === playerColor ? 'YOU WIN!' : 'YOU LOSE!';
-    showNotification(`GAME OVER! ${game.winner.toUpperCase()} WINS! ${winnerText}`);
-    
-    setTimeout(() => {
-      if (confirm(`${game.winner.toUpperCase()} wins! Play again?`)) {
-        location.reload();
-      }
-    }, 2000);
+    }, 'game-state');
   }
 }
 
@@ -760,13 +842,12 @@ function animate() {
   
   if (battleArena.isActive() && currentTime - lastNetworkUpdate > 50 && isConnected) {
     const playerState = battleArena.getPlayerState();
-    ws.send(JSON.stringify({
-      type: 'battleUpdate',
+    networkManager.send('battleUpdate', {
       position: playerState.position,
       rotation: playerState.rotation,
       shot: null,
       health: playerState.health
-    }));
+    }, 'battle-updates'); // Use unreliable channel
     lastNetworkUpdate = currentTime;
   }
   
@@ -809,6 +890,6 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-connectToServer();
+// Start
 updateBoard();
 animate();
