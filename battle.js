@@ -18,6 +18,7 @@ export class BattleArena {
     this.isAttacker = false;
     this.playerGun = null;
     this.opponentGun = null;
+    this.isMultiplayer = false;
 
     // Physics state for player movement
     this.playerVelocity = new THREE.Vector3(0, 0, 0);
@@ -275,11 +276,12 @@ export class BattleArena {
     return root;
   }
 
-  startBattle(playerPiece, opponentPiece, isAttacker, onBattleEnd) {
+  startBattle(playerPiece, opponentPiece, isAttacker, onBattleEnd, isMultiplayer = false) {
     this.battleActive = true;
     this.playerPiece = playerPiece;
     this.opponentPiece = opponentPiece;
     this.isAttacker = isAttacker;
+    this.isMultiplayer = isMultiplayer;
     this.player1Health = 100;
     this.player2Health = 100;
     this.bullets = [];
@@ -749,7 +751,8 @@ export class BattleArena {
       bullet.position.add(bullet.userData.velocity);
       
       // Check hit on opponent with hitbox
-      if (this.opponent) {
+      // In multiplayer mode, skip local damage - opponent's client is authoritative for their health
+      if (this.opponent && !this.isMultiplayer) {
         // Update opponent's AABB in world space
         this.opponentHitBox.setFromObject(this.opponent);
 

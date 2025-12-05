@@ -58,7 +58,8 @@ function handleGameMessage(message) {
         isAttacker,
         (playerWon) => {
           handleBattleEnd(playerWon, isAttacker);
-        }
+        },
+        isConnected  // Pass multiplayer mode flag
       );
       break;
 

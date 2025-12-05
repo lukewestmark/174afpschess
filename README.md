@@ -2,27 +2,19 @@
 
 A multiplayer chess game with FPS battle mode for captures, now using **WebRTC peer-to-peer connections** for LAN gameplay!
 
-## 🚀 What's New in v2.0
-
-- ✨ **True Peer-to-Peer**: Direct WebRTC connections between players (no central server needed during gameplay)
-- 🏠 **LAN-First**: Optimized for local network play with manual IP entry
-- ⚡ **Lower Latency**: Direct P2P connection eliminates server hop (~50% faster)
-- 🔒 **Privacy**: All game data stays on your local network
-- 💰 **Zero Server Costs**: No hosting fees or cloud infrastructure needed
-
-## 📋 Requirements
+##  Requirements
 
 - Modern web browser (Chrome, Firefox, Safari, Edge)
 - Node.js (for running Vite dev server)
 - Both players on the same LAN (Wi-Fi or Ethernet)
 
-## 🛠️ Installation
+## Installation
 
 ```bash
 npm install
 ```
 
-## 🎯 How to Play
+##  How to Play
 
 ### Step 1: Start the Development Server
 
@@ -69,7 +61,7 @@ Once connected:
   - Click to shoot
   - Win the battle to win the square
 
-## ⚙️ Network Configuration (LAN-first)
+##  Network Configuration (LAN-first)
 
 - Default mode is LAN host candidates (`iceTransportPolicy: "all"`) with no TURN required. Ensure both players are on the same subnet and can reach port 8080 on the host.
 - If you previously set a TURN override in `localStorage.turn_config`, clear it for LAN play:
@@ -94,7 +86,7 @@ Once connected:
 - Browser must be allowed through OS firewall.
 - TURN not needed on LAN; leave it unset unless you’re crossing networks.
 
-## 🎮 Controls
+## Controls
 
 ### Chess Mode
 - **WASD**: Move camera
@@ -108,7 +100,7 @@ Once connected:
 - **Click**: Shoot
 - Health: 100 HP (20 damage per hit)
 
-## 🏗️ Architecture
+## Architecture
 
 ### WebRTC P2P Flow
 
@@ -149,7 +141,7 @@ Once connected:
    - Shooting/health data
    - Lower latency for smooth FPS gameplay
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
 ### "Connection failed: timeout"
 
@@ -204,7 +196,7 @@ If board states differ between players:
 - Guest always accepts host's state as truth
 - Connection drops will require reconnection
 
-## 🧪 Testing on Same Computer
+## Testing on Same Computer
 
 You can test with two browser windows on the same machine:
 
@@ -228,7 +220,7 @@ fps-chess/
 └── README.md               # This file
 ```
 
-## 🔬 Technical Details
+## Technical Details
 
 ### WebRTC Configuration
 
@@ -264,15 +256,8 @@ All messages are JSON over WebRTC Data Channels:
 - **Battle Latency**: < 100ms
 - **Data Usage**: ~2KB per move, ~150 bytes per battle update
 
-## 🎯 Advantages of P2P Architecture
 
-1. **Lower Latency**: Direct connection = faster gameplay
-2. **No Server Costs**: No hosting fees, scales infinitely
-3. **Privacy**: Data never leaves your LAN
-4. **Reliability**: No single point of failure
-5. **Simplicity**: No server deployment needed
-
-## 🐛 Known Limitations
+##  Known Limitations
 
 - No internet gameplay (LAN only)
 - No spectator mode
@@ -281,21 +266,9 @@ All messages are JSON over WebRTC Data Channels:
 - No check/checkmate detection (simplified chess rules)
 - No en passant, castling, or pawn promotion
 
-## 🤝 Contributing
 
-Found a bug? Want to improve the game? Feel free to submit issues or pull requests!
+##  License
 
-## 📜 License
+MIT License 
 
-MIT License - Feel free to use and modify!
 
-## 🙏 Credits
-
-Built with:
-- [Three.js](https://threejs.org/) - 3D graphics
-- [Vite](https://vitejs.dev/) - Build tool
-- WebRTC - Peer-to-peer networking
-
----
-
-**Enjoy playing FPS Chess!** ♟️🎮
