@@ -646,7 +646,7 @@ export class BattleArena {
           // Position gun for third-person view on opponent
           gun.position.set(0.0, -0.4, -0.3); // More right, lower
           gun.rotation.set(0, Math.PI / 2, 0); // Point toward player
-          const gunScale = type.toLowerCase() === 'queen' ? 0.007 : 0.7;
+          const gunScale = type.toLowerCase() === 'queen' ? 0.0035 : 0.7;
           gun.scale.set(gunScale, gunScale, gunScale);
           readyRoot.add(gun);
           
