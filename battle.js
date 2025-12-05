@@ -688,7 +688,7 @@ export class BattleArena {
     this.camera.getWorldDirection(direction);
     
     // Bullet velocity
-    bullet.userData.velocity = direction.multiplyScalar(stats.bulletSpeed * 2);
+    bullet.userData.velocity = direction.multiplyScalar(stats.bulletSpeed * 6);
     bullet.userData.damage = stats.damage;
     
     this.arenaGroup.add(bullet);
