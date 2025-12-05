@@ -252,10 +252,25 @@ export class BattleArena {
       const bullet = this.bullets[i];
       bullet.position.add(bullet.userData.velocity);
       
-      if (this.opponent && bullet.position.distanceTo(this.opponent.position) < 0.5) {
-        this.arenaGroup.remove(bullet);
-        this.bullets.splice(i, 1);
-        continue;
+      // FIX: Use a larger bounding box for more forgiving collision detection
+      if (this.opponent) {
+        const opponentBox = new THREE.Box3().setFromObject(this.opponent);
+        // Expand the box to make hitbox more generous (2 units in each direction)
+        opponentBox.expandByScalar(2);
+        
+        if (opponentBox.containsPoint(bullet.position)) {
+          this.player2Health -= 20;
+          this.arenaGroup.remove(bullet);
+          this.bullets.splice(i, 1);
+          
+          if (this.player2Health <= 0) {
+            this.player2Health = 0;
+            if (this.onBattleEnd) {
+              this.onBattleEnd(true);
+            }
+          }
+          continue;
+        }
       }
       
       let hitWall = false;
@@ -278,7 +293,8 @@ export class BattleArena {
       const bullet = this.enemyBullets[i];
       bullet.position.add(bullet.userData.velocity);
       
-      if (bullet.position.distanceTo(this.camera.position) < 0.5) {
+      // FIX: Use a more generous hit radius around the player camera position
+      if (bullet.position.distanceTo(this.camera.position) < 2.0) {
         this.player1Health -= 20;
         this.arenaGroup.remove(bullet);
         this.enemyBullets.splice(i, 1);
