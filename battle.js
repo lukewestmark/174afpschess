@@ -20,6 +20,7 @@ export class BattleArena {
     // Arena boundaries
     this.arenaSize = 20;
     this.arenaWalls = [];
+    this.coverBoxes = []; // Separate array for cover boxes
 
     // GLTF loader - NO CACHE
     this.gltfLoader = new GLTFLoader();
@@ -97,6 +98,7 @@ export class BattleArena {
     this.bullets = [];
     this.enemyBullets = [];
     this.onBattleEnd = onBattleEnd;
+    this.lastValidPosition = null; // Track last valid position
     
     this.createArena();
     
@@ -110,6 +112,9 @@ export class BattleArena {
       this.camera.rotation.set(0, -Math.PI / 2, 0);
       this.createOpponent(-8, 0, 0);
     }
+    
+    // Store initial position
+    this.lastValidPosition = this.camera.position.clone();
     
     return {
       playerHealth: this.player1Health,
@@ -204,8 +209,11 @@ export class BattleArena {
       box.castShadow = true;
       box.receiveShadow = true;
       this.arenaGroup.add(box);
-      this.arenaWalls.push(box);
+      this.arenaWalls.push(box); // For bullet collision
+      this.coverBoxes.push(box);  // For player collision
     });
+    
+    console.log('Created', this.coverBoxes.length, 'cover boxes');
   }
 
   createOpponent(x, y, z) {
@@ -252,25 +260,10 @@ export class BattleArena {
       const bullet = this.bullets[i];
       bullet.position.add(bullet.userData.velocity);
       
-      // FIX: Use a larger bounding box for more forgiving collision detection
-      if (this.opponent) {
-        const opponentBox = new THREE.Box3().setFromObject(this.opponent);
-        // Expand the box to make hitbox more generous (2 units in each direction)
-        opponentBox.expandByScalar(2);
-        
-        if (opponentBox.containsPoint(bullet.position)) {
-          this.player2Health -= 20;
-          this.arenaGroup.remove(bullet);
-          this.bullets.splice(i, 1);
-          
-          if (this.player2Health <= 0) {
-            this.player2Health = 0;
-            if (this.onBattleEnd) {
-              this.onBattleEnd(true);
-            }
-          }
-          continue;
-        }
+      if (this.opponent && bullet.position.distanceTo(this.opponent.position) < 0.5) {
+        this.arenaGroup.remove(bullet);
+        this.bullets.splice(i, 1);
+        continue;
       }
       
       let hitWall = false;
@@ -293,8 +286,7 @@ export class BattleArena {
       const bullet = this.enemyBullets[i];
       bullet.position.add(bullet.userData.velocity);
       
-      // FIX: Use a more generous hit radius around the player camera position
-      if (bullet.position.distanceTo(this.camera.position) < 2.0) {
+      if (bullet.position.distanceTo(this.camera.position) < 0.5) {
         this.player1Health -= 20;
         this.arenaGroup.remove(bullet);
         this.enemyBullets.splice(i, 1);
@@ -348,9 +340,40 @@ export class BattleArena {
     if (!this.battleActive) return position;
     
     const halfSize = this.arenaSize / 2 - 0.5;
+    const playerRadius = 0.5;
+    
+    // Clamp to arena boundaries
     position.x = Math.max(-halfSize, Math.min(halfSize, position.x));
     position.z = Math.max(-halfSize, Math.min(halfSize, position.z));
     position.y = Math.max(0.5, Math.min(4, position.y));
+    
+    // Check collision with cover boxes (only X and Z, ignore Y)
+    for (const box of this.coverBoxes) {
+      const boxBounds = new THREE.Box3().setFromObject(box);
+      
+      // Check if player X,Z position overlaps with box X,Z bounds (with radius)
+      if (position.x + playerRadius > boxBounds.min.x && position.x - playerRadius < boxBounds.max.x &&
+          position.z + playerRadius > boxBounds.min.z && position.z - playerRadius < boxBounds.max.z) {
+        
+        console.log('COLLISION DETECTED!', {
+          playerPos: position,
+          boxMin: boxBounds.min,
+          boxMax: boxBounds.max
+        });
+        
+        // Collision! Revert to last valid position
+        if (this.lastValidPosition) {
+          position.copy(this.lastValidPosition);
+        }
+        return position;
+      }
+    }
+    
+    // No collision - store this as last valid position
+    if (!this.lastValidPosition) {
+      this.lastValidPosition = new THREE.Vector3();
+    }
+    this.lastValidPosition.copy(position);
     
     return position;
   }

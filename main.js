@@ -680,12 +680,23 @@ function updateMovement() {
     
     const moveSpeedBattle = 0.15;
     
-    if (keys['KeyW']) camera.position.addScaledVector(forward, moveSpeedBattle);
-    if (keys['KeyS']) camera.position.addScaledVector(forward, -moveSpeedBattle);
-    if (keys['KeyA']) camera.position.addScaledVector(right, -moveSpeedBattle);
-    if (keys['KeyD']) camera.position.addScaledVector(right, moveSpeedBattle);
-    
-    battleArena.constrainPlayerMovement(camera.position);
+    // Check collision after EACH movement
+    if (keys['KeyW']) {
+      camera.position.addScaledVector(forward, moveSpeedBattle);
+      battleArena.constrainPlayerMovement(camera.position);
+    }
+    if (keys['KeyS']) {
+      camera.position.addScaledVector(forward, -moveSpeedBattle);
+      battleArena.constrainPlayerMovement(camera.position);
+    }
+    if (keys['KeyA']) {
+      camera.position.addScaledVector(right, -moveSpeedBattle);
+      battleArena.constrainPlayerMovement(camera.position);
+    }
+    if (keys['KeyD']) {
+      camera.position.addScaledVector(right, moveSpeedBattle);
+      battleArena.constrainPlayerMovement(camera.position);
+    }
   } else {
     const forward = new THREE.Vector3();
     const right = new THREE.Vector3();
