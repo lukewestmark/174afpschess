@@ -191,7 +191,7 @@ export class BattleArena {
             scale = 0.12;
             break;
           case 'queen': // Assault Rifle
-            scale = 0.0001;
+            scale = 0.002;
             break;
           case 'king': // Sniper Rifle
             scale = 0.05;
@@ -646,7 +646,8 @@ export class BattleArena {
           // Position gun for third-person view on opponent
           gun.position.set(0.0, -0.4, -0.3); // More right, lower
           gun.rotation.set(0, Math.PI / 2, 0); // Point toward player
-          gun.scale.set(0.7, 0.7, 0.7); // Scale as specified
+          const gunScale = type.toLowerCase() === 'queen' ? 0.014 : 0.7;
+          gun.scale.set(gunScale, gunScale, gunScale);
           readyRoot.add(gun);
           
           console.log('Opponent gun loaded and attached');
