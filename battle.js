@@ -56,10 +56,10 @@ export class BattleArena {
         name: 'Submachine Gun'
       },
       knight: {
-        damage: 35,
+        damage: 45,
         fireRate: 0.8,
-        bulletSpeed: 0.35,
-        bulletSize: 0.15,
+        bulletSpeed: 0.30,
+        bulletSize: 0.2,
         color: 0xff0000,
         name: 'Shotgun'
       },
@@ -72,7 +72,7 @@ export class BattleArena {
         name: 'Revolver'
       },
       queen: {
-        damage: 12,
+        damage: 20,
         fireRate: 0.2,
         bulletSpeed: 0.65,
         bulletSize: 0.07,
@@ -80,7 +80,7 @@ export class BattleArena {
         name: 'Assault Rifle'
       },
       king: {
-        damage: 50,
+        damage: 100,
         fireRate: 1.2,
         bulletSpeed: 0.8,
         bulletSize: 0.05,
