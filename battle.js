@@ -194,7 +194,7 @@ export class BattleArena {
             scale = 0.002;
             break;
           case 'king': // Sniper Rifle
-            scale = 0.05;
+            scale = 0.1;
             break;
           default:
             scale = 0.15;
@@ -646,7 +646,7 @@ export class BattleArena {
           // Position gun for third-person view on opponent
           gun.position.set(0.0, -0.4, -0.3); // More right, lower
           gun.rotation.set(0, Math.PI / 2, 0); // Point toward player
-          const gunScale = type.toLowerCase() === 'queen' ? 0.014 : 0.7;
+          const gunScale = type.toLowerCase() === 'queen' ? 0.007 : 0.7;
           gun.scale.set(gunScale, gunScale, gunScale);
           readyRoot.add(gun);
           
