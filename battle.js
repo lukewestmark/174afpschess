@@ -191,7 +191,7 @@ export class BattleArena {
             scale = 0.12;
             break;
           case 'queen': // Assault Rifle
-            scale = 0.003;
+            scale = 0.0001;
             break;
           case 'king': // Sniper Rifle
             scale = 0.05;
