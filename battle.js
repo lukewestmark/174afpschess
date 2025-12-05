@@ -136,7 +136,12 @@ export class BattleArena {
         bishop:'/assets/Bishop/Revolver_1.glb',
         queen: '/assets/Queen/AssaultRifle_2.glb',
         king:  '/assets/King/SniperRifle_1.glb'
-      };
+    };
+
+    // Reusable hitbox + temp sphere for collision
+    this.opponentHitBox = new THREE.Box3();
+    this.tempBulletSphere = new THREE.Sphere();
+    
   }
 
   loadGunModel(type, callback) {
@@ -646,7 +651,7 @@ export class BattleArena {
           // Position gun for third-person view on opponent
           gun.position.set(0.0, -0.4, -0.3); // More right, lower
           gun.rotation.set(0, Math.PI / 2, 0); // Point toward player
-          const gunScale = type.toLowerCase() === 'queen' ? 0.0035 : 0.7;
+          const gunScale = type.toLowerCase() === 'queen' ? 0.006 : 0.7;
           gun.scale.set(gunScale, gunScale, gunScale);
           readyRoot.add(gun);
           
@@ -691,6 +696,7 @@ export class BattleArena {
     // Bullet velocity
     bullet.userData.velocity = direction.multiplyScalar(stats.bulletSpeed * 6);
     bullet.userData.damage = stats.damage;
+    bullet.userData.radius = stats.bulletSize;
     
     this.arenaGroup.add(bullet);
     this.bullets.push(bullet);
@@ -743,18 +749,34 @@ export class BattleArena {
       bullet.position.add(bullet.userData.velocity);
       
       // Check hit on opponent with hitbox
-      if (this.opponent && bullet.position.distanceTo(this.opponent.position) < 0.75) { // Hitbox set to 0.75
-        this.player2Health -= bullet.userData.damage || 20;
-        this.arenaGroup.remove(bullet);
-        this.bullets.splice(i, 1);
-        
-        if (this.player2Health <= 0) {
-          this.player2Health = 0;
-          if (this.onBattleEnd) {
-            this.onBattleEnd(true);
+      if (this.opponent) {
+        // Update opponent's AABB in world space
+        this.opponentHitBox.setFromObject(this.opponent);
+
+        // Expand hitbox for more forgiving hit detection
+        this.opponentHitBox.expandByScalar(1.5);
+
+        // Build a sphere for this bullet (center + radius)
+        const bulletRadius =
+          bullet.userData.radius ??
+          (bullet.geometry?.parameters?.radius ?? 0.05);
+
+        this.tempBulletSphere.center.copy(bullet.position);
+        this.tempBulletSphere.radius = bulletRadius;
+
+        if (this.opponentHitBox.intersectsSphere(this.tempBulletSphere)) {
+          this.player2Health -= bullet.userData.damage || 20;
+          this.arenaGroup.remove(bullet);
+          this.bullets.splice(i, 1);
+
+          if (this.player2Health <= 0) {
+            this.player2Health = 0;
+            if (this.onBattleEnd) {
+              this.onBattleEnd(true);
+            }
           }
+          continue;
         }
-        continue;
       }
       
       let hitWall = false;
@@ -778,19 +800,26 @@ export class BattleArena {
       bullet.position.add(bullet.userData.velocity);
       
       // Check hit on player with hitbox
-      if (bullet.position.distanceTo(this.camera.position) < 0.75) { // Hitbox set to 0.75
-        const damage = bullet.userData.damage || 20;
-        this.player1Health -= damage;
-        this.arenaGroup.remove(bullet);
-        this.enemyBullets.splice(i, 1);
-        
-        if (this.player1Health <= 0) {
-          this.player1Health = 0;
-          if (this.onBattleEnd) {
-            this.onBattleEnd(false);
+      {
+        const bulletRadius =
+          bullet.userData.radius ??
+          (bullet.geometry?.parameters?.radius ?? 0.05);
+
+        const playerBaseRadius = 0.75; // your "body" radius around camera
+        if (bullet.position.distanceTo(this.camera.position) < playerBaseRadius + bulletRadius) {
+          const damage = bullet.userData.damage || 20;
+          this.player1Health -= damage;
+          this.arenaGroup.remove(bullet);
+          this.enemyBullets.splice(i, 1);
+          
+          if (this.player1Health <= 0) {
+            this.player1Health = 0;
+            if (this.onBattleEnd) {
+              this.onBattleEnd(false);
+            }
           }
+          continue;
         }
-        continue;
       }
       
       let hitWall = false;
@@ -1053,6 +1082,7 @@ export class BattleArena {
       shotData.velocity.z
     );
     bullet.userData.damage = shotData.damage || stats.damage;
+    bullet.userData.radius = stats.bulletSize;
     
     this.arenaGroup.add(bullet);
     this.enemyBullets.push(bullet);
