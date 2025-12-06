@@ -18,14 +18,12 @@ function handleGameMessage(message) {
       break;
 
     case 'moveRequest':
-      // Host only - validate guest's move
       if (isHost) {
         handleGuestMoveRequest(message);
       }
       break;
 
     case 'gameState':
-      // Guest only - update from host
       if (!isHost) {
         game.board = message.board;
         game.currentTurn = message.currentTurn;
@@ -45,10 +43,6 @@ function handleGameMessage(message) {
       boardGroup.visible = false;
 
       showNotification(isAttacker ? 'You are attacking! Win the battle!' : 'Defend yourself!');
-
-      // CRITICAL FIX: For the defender, swap the pieces so they see their own piece correctly
-      // Attacker sees: their piece (attacking) vs opponent piece (defending)
-      // Defender sees: their piece (defending) vs opponent piece (attacking)
       const myPiece = isAttacker ? message.attackingPiece : message.defendingPiece;
       const enemyPiece = isAttacker ? message.defendingPiece : message.attackingPiece;
 
@@ -59,7 +53,7 @@ function handleGameMessage(message) {
         (playerWon) => {
           handleBattleEnd(playerWon, isAttacker);
         },
-        isConnected  // Pass multiplayer mode flag
+        isConnected
       );
       break;
 
@@ -715,8 +709,6 @@ document.addEventListener('click', (e) => {
     const isCapture = prevSelected && targetPiece &&
       targetPiece.color !== playerColor && isValidDestination;
 
-    // CRITICAL FIX: Use the piece data stored in prevSelected
-    // (getting from board might return null if state changed)
     const attackingPiece = prevSelected ? prevSelected.piece : null;
 
     // For capture moves, defer board updates until the battle resolves
@@ -860,7 +852,6 @@ function handleBattleEnd(playerWon, isAttacker) {
     }, 'game-state');
   }
 
-  // CRITICAL FIX: Clean up local battle arena
   // (The opponent will clean up when they receive the battleEnded message)
   if (battleArena.isActive()) {
     battleArena.cleanup();

@@ -26,8 +26,8 @@ export class BattleArena {
     this.jumpPressed = false;
     this.groundLevel = 1.6; // Camera Y position when on ground
 
-    // Physics constants (tuned for game feel)
-    this.gravity = 15; // units/s² - faster than real gravity for responsive feel
+    // Physics constants
+    this.gravity = 15; // units/s² - faster than real gravity
     this.jumpVelocity = 6.5; // units/s - results in ~1.41 unit jump height
     this.maxSpeed = 6; // units/s - horizontal speed cap (prevents diagonal exploit)
     this.moveAcceleration = 40; // units/s² - high for responsive input
@@ -92,7 +92,7 @@ export class BattleArena {
     
     this.lastShotTime = 0;
 
-    // GLTF loader - NO CACHE
+    // GLTF loader
     this.gltfLoader = new GLTFLoader();
 
     // TextureLoader initialization
@@ -163,12 +163,11 @@ export class BattleArena {
             child.castShadow = true;
             child.receiveShadow = true;
             
-            // Force a bright, visible material
             child.material = new THREE.MeshStandardMaterial({
-              color: 0x444444, // Dark gray so it's visible
+              color: 0x444444,
               metalness: 0.7,
               roughness: 0.3,
-              side: THREE.DoubleSide // Render both sides
+              side: THREE.DoubleSide
             });
           }
         });
@@ -208,10 +207,10 @@ export class BattleArena {
         
         gun.scale.set(scale, scale, scale);
         
-        // Position for FPS view - will be updated to follow camera
+        // Position for FPS view 
         gun.position.set(0.25, -0.2, -0.6);
         
-        // Rotate gun to point forward (adjust based on model's default orientation)
+        // Rotate gun to point forward
         gun.rotation.set(0, Math.PI / 2, 0);
 
         if (callback) callback(gun);
@@ -235,7 +234,7 @@ export class BattleArena {
       return root;
     }
 
-    // Load fresh each time, NO CACHING
+    // Load fresh each time
     this.gltfLoader.load(
       path,
       (gltf) => {
@@ -246,8 +245,6 @@ export class BattleArena {
             child.castShadow = true;
             child.receiveShadow = true;
             
-            // Create a completely new material for EACH mesh
-            // This ensures no material sharing between pieces
             child.material = new THREE.MeshStandardMaterial({
               color: targetColor,
               metalness: 0.3,
@@ -259,8 +256,6 @@ export class BattleArena {
         // Make pieces bigger for the arena
         const scale = 48;
         model.scale.set(scale, scale, scale);
-
-        // Move it down
         model.position.y = -1.5;
 
         root.add(model);
@@ -287,17 +282,17 @@ export class BattleArena {
     this.bullets = [];
     this.enemyBullets = [];
     this.onBattleEnd = onBattleEnd;
-    this.lastValidPosition = null; // Track last valid position
+    this.lastValidPosition = null;
     this.lastShotTime = 0;
 
     // Reset physics state
     this.playerVelocity.set(0, 0, 0);
-    this.isGrounded = true; // Start on ground
+    this.isGrounded = true;
     this.jumpPressed = false;
 
     this.createArena();
     
-    // Load player's gun - position as centered barrel view
+    // Load player's gun 
     this.loadGunModel(playerPiece.type, (gun) => {
       if (gun) {
         this.playerGun = gun;
@@ -305,20 +300,17 @@ export class BattleArena {
         // Add gun to arena group
         this.arenaGroup.add(gun);
         
-        // Position gun very close to camera (barrel-only view)
         const gunWorldPos = this.camera.position.clone();
         const forward = new THREE.Vector3(0, 0, -1);
         forward.applyQuaternion(this.camera.quaternion);
         
-        // Very close to camera so only barrel is visible
         gunWorldPos.add(forward.multiplyScalar(0.3)); // Very close
         gunWorldPos.y -= 0.25; // Slightly down
         
         gun.position.copy(gunWorldPos);
         
-        // Copy camera rotation and add offset to point forward
         gun.rotation.copy(this.camera.rotation);
-        gun.rotation.y += Math.PI / 2; // Add 90 degrees to point forward
+        gun.rotation.y += Math.PI / 2;
         
         console.log('Player gun loaded at centered position');
         console.log('Gun world position:', gun.position);
@@ -399,10 +391,9 @@ export class BattleArena {
   }
 
   createArena() {
-    // Floor - Load textures first, create with placeholder material
+    // Floor
     const floorGeometry = new THREE.PlaneGeometry(this.arenaSize, this.arenaSize);
 
-    // Create placeholder material (will be replaced when textures load)
     const floorMaterial = new THREE.MeshStandardMaterial({
       color: 0x444444,
       roughness: 0.8
@@ -414,14 +405,11 @@ export class BattleArena {
     floor.receiveShadow = true;
     this.arenaGroup.add(floor);
 
-    // Load grass textures asynchronously
     this.loadMaterialTextures('grass', (textures) => {
-      // Configure texture wrapping and repeat for tiling
       Object.values(textures).forEach(texture => {
         if (texture) {
           texture.wrapS = THREE.RepeatWrapping;
           texture.wrapT = THREE.RepeatWrapping;
-          // Repeat 4x4 times across the 20x20 unit floor (5 units per repeat)
           texture.repeat.set(4, 4);
         }
       });
@@ -433,15 +421,13 @@ export class BattleArena {
 
       // Normal map configuration
       if (textures.normal) {
-        floor.material.normalScale = new THREE.Vector2(0.5, 0.5); // Adjust strength
+        floor.material.normalScale = new THREE.Vector2(0.5, 0.5);
       }
 
       // Remove solid color tint when texture is applied
       if (textures.diffuse) {
         floor.material.color.setHex(0xffffff);
       }
-
-      // Important: Tell Three.js to update the material
       floor.material.needsUpdate = true;
 
       console.log('Grass floor textures applied');
@@ -510,7 +496,6 @@ export class BattleArena {
       const walls = [northWall, southWall, eastWall, westWall];
 
       walls.forEach(wall => {
-        // Configure texture wrapping and repeat
         Object.values(textures).forEach(texture => {
           if (texture) {
             texture.wrapS = THREE.RepeatWrapping;
@@ -518,15 +503,12 @@ export class BattleArena {
           }
         });
 
-        // Different repeat for horizontal vs vertical walls
         const isHorizontalWall = wall === northWall || wall === southWall;
         if (isHorizontalWall) {
-          // North/South walls: 20 units wide x 5 units tall
           Object.values(textures).forEach(texture => {
-            if (texture) texture.repeat.set(10, 2.5); // 2 units per repeat
+            if (texture) texture.repeat.set(10, 2.5);
           });
         } else {
-          // East/West walls: 20 units deep x 5 units tall
           Object.values(textures).forEach(texture => {
             if (texture) texture.repeat.set(10, 2.5);
           });
@@ -537,20 +519,17 @@ export class BattleArena {
         wall.material.normalMap = textures.normal || null;
         wall.material.roughnessMap = textures.roughness || null;
 
-        // Normal map strength for gritty industrial look
         if (textures.normal) {
-          wall.material.normalScale = new THREE.Vector2(1.0, 1.0); // Full strength
+          wall.material.normalScale = new THREE.Vector2(1.0, 1.0);
         }
 
-        // REMOVE transparency - make walls fully opaque
         wall.material.transparent = false;
         wall.material.opacity = 1.0;
 
-        // Set to grey if diffuse texture loaded
         if (textures.diffuse) {
           wall.material.color.setHex(0xffffff);
         } else {
-          wall.material.color.setHex(0x888888); // Fallback grey
+          wall.material.color.setHex(0x888888);
         }
 
         wall.material.needsUpdate = true;
@@ -568,11 +547,11 @@ export class BattleArena {
     const coverMaterial = new THREE.MeshStandardMaterial({ color: 0x555555 });
 
     const positions = [
-      [-6, 1.25, -6],  // Southwest (Y = 1.25 for 2.5 height box)
+      [-6, 1.25, -6],  // Southwest 
       [6, 1.25, 6],    // Northeast
       [-6, 1.25, 6],   // Northwest
       [6, 1.25, -6],   // Southeast
-      [0, 0.5, 0]      // CENTER (Y = 0.5 for 1.0 height box, unchanged)
+      [0, 0.5, 0]      // Center
     ];
 
     const boxes = [];
@@ -602,12 +581,11 @@ export class BattleArena {
     // Load metal textures for industrial look
     this.loadMaterialTextures('metal', (textures) => {
       boxes.forEach(box => {
-        // Configure texture wrapping
         Object.values(textures).forEach(texture => {
           if (texture) {
             texture.wrapS = THREE.RepeatWrapping;
             texture.wrapT = THREE.RepeatWrapping;
-            texture.repeat.set(1, 1); // Single repeat for 1.5x1x1.5 boxes
+            texture.repeat.set(1, 1);
           }
         });
 
@@ -627,7 +605,7 @@ export class BattleArena {
         if (textures.diffuse) {
           box.material.color.setHex(0xffffff);
         } else {
-          box.material.color.setHex(0x666666); // Darker grey fallback
+          box.material.color.setHex(0x666666);
         }
 
         box.material.needsUpdate = true;
@@ -651,8 +629,8 @@ export class BattleArena {
         if (gun) {
           this.opponentGun = gun;
           // Position gun for third-person view on opponent
-          gun.position.set(0.0, -0.4, -0.3); // More right, lower
-          gun.rotation.set(0, Math.PI / 2, 0); // Point toward player
+          gun.position.set(0.0, -0.4, -0.3);
+          gun.rotation.set(0, Math.PI / 2, 0);
           const gunScale = type.toLowerCase() === 'queen' ? 0.006 : 0.7;
           gun.scale.set(gunScale, gunScale, gunScale);
           readyRoot.add(gun);
@@ -736,13 +714,12 @@ export class BattleArena {
       const forward = new THREE.Vector3(0, 0, -1);
       forward.applyQuaternion(this.camera.quaternion);
       
-      // Very close to camera so only barrel is visible
       gunWorldPos.add(forward.multiplyScalar(0.3));
       gunWorldPos.y -= 0.25;
       
       this.playerGun.position.copy(gunWorldPos);
       this.playerGun.rotation.copy(this.camera.rotation);
-      this.playerGun.rotation.y += Math.PI / 2; // Add 90 degrees to point forward
+      this.playerGun.rotation.y += Math.PI / 2;
     }
     
     // Update player bullets
@@ -750,16 +727,9 @@ export class BattleArena {
       const bullet = this.bullets[i];
       bullet.position.add(bullet.userData.velocity);
       
-      // Check hit on opponent with hitbox
-      // In multiplayer mode, skip local damage - opponent's client is authoritative for their health
       if (this.opponent && !this.isMultiplayer) {
-        // Update opponent's AABB in world space
         this.opponentHitBox.setFromObject(this.opponent);
-
-        // Expand hitbox for more forgiving hit detection
         this.opponentHitBox.expandByScalar(1.5);
-
-        // Build a sphere for this bullet (center + radius)
         const bulletRadius =
           bullet.userData.radius ??
           (bullet.geometry?.parameters?.radius ?? 0.05);
@@ -808,7 +778,7 @@ export class BattleArena {
           bullet.userData.radius ??
           (bullet.geometry?.parameters?.radius ?? 0.05);
 
-        const playerBaseRadius = 0.75; // your "body" radius around camera
+        const playerBaseRadius = 0.75;
         if (bullet.position.distanceTo(this.camera.position) < playerBaseRadius + bulletRadius) {
           const damage = bullet.userData.damage || 20;
           this.player1Health -= damage;
@@ -847,12 +817,11 @@ export class BattleArena {
   }
 
   updateBattlePhysics(keys, deltaTime, camera) {
-    // 1. Calculate input direction (world space, horizontal only)
     const forward = new THREE.Vector3();
     const right = new THREE.Vector3();
 
     camera.getWorldDirection(forward);
-    forward.y = 0; // Project to horizontal plane
+    forward.y = 0;
     forward.normalize();
 
     right.crossVectors(forward, new THREE.Vector3(0, 1, 0));
@@ -863,14 +832,11 @@ export class BattleArena {
     if (keys['KeyA']) inputDir.sub(right);
     if (keys['KeyD']) inputDir.add(right);
 
-    // 2. Apply horizontal acceleration or friction
     if (inputDir.lengthSq() > 0) {
-      // Player pressing movement keys - apply acceleration
-      inputDir.normalize(); // Ensure diagonal input doesn't accelerate faster
+      inputDir.normalize();
       this.playerVelocity.x += inputDir.x * this.moveAcceleration * deltaTime;
       this.playerVelocity.z += inputDir.z * this.moveAcceleration * deltaTime;
     } else {
-      // No input - apply friction to slow down
       const horizontalSpeed = Math.sqrt(
         this.playerVelocity.x * this.playerVelocity.x +
         this.playerVelocity.z * this.playerVelocity.z
@@ -888,7 +854,6 @@ export class BattleArena {
       }
     }
 
-    // 3. Cap horizontal speed (prevents diagonal movement exploit)
     const horizontalSpeed = Math.sqrt(
       this.playerVelocity.x * this.playerVelocity.x +
       this.playerVelocity.z * this.playerVelocity.z
@@ -900,28 +865,23 @@ export class BattleArena {
       this.playerVelocity.z *= scale;
     }
 
-    // 4. Handle jumping
     if (keys['Space'] && !this.jumpPressed && this.isGrounded) {
       this.playerVelocity.y = this.jumpVelocity;
       this.isGrounded = false;
       this.jumpPressed = true;
     }
 
-    // Reset jump flag when space released (enables next jump)
     if (!keys['Space']) {
       this.jumpPressed = false;
     }
 
-    // 5. Apply gravity (always, even when grounded)
     this.playerVelocity.y -= this.gravity * deltaTime;
 
-    // 6. Calculate new position from velocity
     const newPosition = camera.position.clone();
     newPosition.x += this.playerVelocity.x * deltaTime;
     newPosition.y += this.playerVelocity.y * deltaTime;
     newPosition.z += this.playerVelocity.z * deltaTime;
 
-    // 7. Ground collision detection
     if (newPosition.y <= this.groundLevel) {
       newPosition.y = this.groundLevel;
       this.playerVelocity.y = 0; // Stop falling
@@ -930,7 +890,6 @@ export class BattleArena {
       this.isGrounded = false;
     }
 
-    // 8. Ceiling collision detection
     if (newPosition.y >= 6) { // Increased to match taller walls
       newPosition.y = 6;
       if (this.playerVelocity.y > 0) {
@@ -938,14 +897,9 @@ export class BattleArena {
       }
     }
 
-    // 9. Apply arena constraints (walls, boxes, boundaries)
     this.constrainPlayerMovement(newPosition);
 
-    // 10. Update camera position
     camera.position.copy(newPosition);
-
-    // Note: Horizontal velocity is NOT zeroed on collision
-    // This allows "wall sliding" for smooth movement
   }
 
   endBattle(playerWon) {
@@ -995,7 +949,6 @@ export class BattleArena {
           boxMax: boxBounds.max
         });
         
-        // Collision! Revert to last valid position
         if (this.lastValidPosition) {
           position.copy(this.lastValidPosition);
         }

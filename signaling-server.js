@@ -76,8 +76,8 @@ export class SignalingServer {
       this.server.listen(port, () => {
         const ips = this.getLocalIPs();
         this.primaryHostIp = (ips.find(ip => ip.isPrimary) || ips[0] || {}).address || null;
-        console.log(`\n🚀 Signaling server running on port ${port}`);
-        console.log('\n📡 Local IP addresses:');
+        console.log(`\nSignaling server running on port ${port}`);
+        console.log('\nLocal IP addresses:');
         ips.forEach(ip => {
           const marker = ip.isPrimary ? ' ⭐' : '';
           console.log(`   ${ip.interface}: ${ip.address}${marker}`);
@@ -100,7 +100,7 @@ export class SignalingServer {
     if (this.hostOffer) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ offer: this.hostOffer }));
-      console.log('📤 Sent offer to guest');
+      console.log('Sent offer to guest');
     } else {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Offer not ready yet' }));
@@ -121,7 +121,7 @@ export class SignalingServer {
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
-        console.log('📥 Received offer from host (signaling state reset)');
+        console.log('Received offer from host (signaling state reset)');
       } catch (error) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid JSON' }));
@@ -133,7 +133,7 @@ export class SignalingServer {
     if (this.guestAnswer) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ answer: this.guestAnswer }));
-      console.log('📤 Sent answer to host');
+      console.log('Sent answer to host');
     } else {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Answer not ready yet' }));
@@ -149,7 +149,7 @@ export class SignalingServer {
         this.guestAnswer = data.answer;
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
-        console.log('📥 Received answer from guest');
+        console.log('Received answer from guest');
       } catch (error) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid JSON' }));
@@ -183,10 +183,10 @@ export class SignalingServer {
 
         if (isHost) {
           this.hostIceCandidates.push(candidate);
-          console.log(`📤 Stored host ICE candidate (total: ${this.hostIceCandidates.length}) ${desc}`);
+          console.log(`Stored host ICE candidate (total: ${this.hostIceCandidates.length}) ${desc}`);
         } else {
           this.guestIceCandidates.push(candidate);
-          console.log(`📥 Stored guest ICE candidate (total: ${this.guestIceCandidates.length}) ${desc}`);
+          console.log(`Stored guest ICE candidate (total: ${this.guestIceCandidates.length}) ${desc}`);
         }
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -206,7 +206,7 @@ export class SignalingServer {
 
   setOffer(offer) {
     this.hostOffer = offer;
-    console.log('✅ Host offer set and ready');
+    console.log('Host offer set and ready');
   }
 
   getAnswer() {
@@ -216,7 +216,7 @@ export class SignalingServer {
   shutdown() {
     if (this.server) {
       this.server.close(() => {
-        console.log('🛑 Signaling server shut down');
+        console.log('Signaling server shut down');
       });
     }
   }

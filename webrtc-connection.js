@@ -70,7 +70,7 @@ export class WebRTCConnection {
     this.peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
         this.iceCandidates.push(event.candidate);
-        console.log('🧊 ICE candidate generated:', this.describeCandidate(event.candidate), event.candidate.candidate || '');
+        console.log('ICE candidate generated:', this.describeCandidate(event.candidate), event.candidate.candidate || '');
       }
     };
 
@@ -86,7 +86,7 @@ export class WebRTCConnection {
     // Monitor connection state
     this.peerConnection.onconnectionstatechange = () => {
       const state = this.peerConnection.connectionState;
-      console.log('🔗 Connection state:', state);
+      console.log('Connection state:', state);
       if (this.connectionStateCallback) {
         this.connectionStateCallback(state);
       }
@@ -94,7 +94,7 @@ export class WebRTCConnection {
 
     // Set up ICE connection state monitoring
     this.peerConnection.oniceconnectionstatechange = () => {
-      console.log('❄️  ICE connection state:', this.peerConnection.iceConnectionState);
+      console.log('ICE connection state:', this.peerConnection.iceConnectionState);
     };
 
     if (this.isHost) {
@@ -103,7 +103,7 @@ export class WebRTCConnection {
     } else {
       // Guest waits for data channels from host
       this.peerConnection.ondatachannel = (event) => {
-        console.log('📡 Received data channel:', event.channel.label);
+        console.log('Received data channel:', event.channel.label);
 
         if (event.channel.label === 'game-state') {
           this.reliableChannel = event.channel;
@@ -115,7 +115,7 @@ export class WebRTCConnection {
       };
     }
 
-    console.log(`✅ WebRTC initialized as ${this.isHost ? 'HOST' : 'GUEST'}`);
+    console.log(`WebRTC initialized as ${this.isHost ? 'HOST' : 'GUEST'}`);
   }
 
   async createDataChannels() {
@@ -125,7 +125,7 @@ export class WebRTCConnection {
       maxRetransmits: null
     });
     this.setupChannelHandlers(this.reliableChannel);
-    console.log('📺 Created reliable channel: game-state');
+    console.log('Created reliable channel: game-state');
 
     // Unreliable channel for real-time battle updates
     this.unreliableChannel = this.peerConnection.createDataChannel('battle-updates', {
@@ -133,20 +133,20 @@ export class WebRTCConnection {
       maxRetransmits: 0
     });
     this.setupChannelHandlers(this.unreliableChannel);
-    console.log('📺 Created unreliable channel: battle-updates');
+    console.log('Created unreliable channel: battle-updates');
   }
 
   setupChannelHandlers(channel) {
     channel.onopen = () => {
-      console.log(`✅ Data channel opened: ${channel.label}`);
+      console.log(`Data channel opened: ${channel.label}`);
     };
 
     channel.onclose = () => {
-      console.log(`❌ Data channel closed: ${channel.label}`);
+      console.log(`Data channel closed: ${channel.label}`);
     };
 
     channel.onerror = (error) => {
-      console.error(`⚠️  Data channel error on ${channel.label}:`, error);
+      console.error(`Data channel error on ${channel.label}:`, error);
     };
 
     channel.onmessage = (event) => {
@@ -169,7 +169,7 @@ export class WebRTCConnection {
     const offer = await this.peerConnection.createOffer();
     await this.peerConnection.setLocalDescription(offer);
 
-    console.log('📤 Created offer');
+    console.log('Created offer');
     return offer;
   }
 
@@ -183,7 +183,7 @@ export class WebRTCConnection {
     const answer = await this.peerConnection.createAnswer();
     await this.peerConnection.setLocalDescription(answer);
 
-    console.log('📤 Created answer');
+    console.log('Created answer');
     return answer;
   }
 
@@ -195,7 +195,7 @@ export class WebRTCConnection {
     await this.peerConnection.setRemoteDescription(new RTCSessionDescription(description));
     this.remoteDescriptionSet = true;
     this.remoteUfrag = this.extractRemoteUfrag(this.peerConnection.remoteDescription?.sdp);
-    console.log('📥 Set remote description');
+    console.log('Set remote description');
 
     await this.flushPendingIceCandidates();
   }
@@ -214,7 +214,7 @@ export class WebRTCConnection {
     }
 
     if (!this.remoteDescriptionSet) {
-      console.log('⏳ Queueing ICE candidate (waiting for remote description)');
+      console.log('Queueing ICE candidate (waiting for remote description)');
       this.pendingIceCandidates.push(candidate);
       return;
     }
@@ -222,7 +222,7 @@ export class WebRTCConnection {
     try {
       console.log('Adding ICE candidate:', this.describeCandidate(candidate), candidate.candidate || '');
       await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-      console.log('📥 Added ICE candidate');
+      console.log('Added ICE candidate');
     } catch (error) {
       console.error('Error adding ICE candidate:', error);
     }
@@ -278,7 +278,7 @@ export class WebRTCConnection {
       this.peerConnection.close();
     }
     this.pendingIceCandidates = [];
-    console.log('🛑 WebRTC connection closed');
+    console.log('WebRTC connection closed');
   }
 
   async flushPendingIceCandidates() {
